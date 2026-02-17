@@ -104,8 +104,17 @@ address KernelParameters::alloc(device::VirtualDevice& vDev) {
 }
 
 // =================================================================================================
+// TODO: rename this function to indicate that it is only for HIP
 bool KernelParameters::captureAndSet(void** kernelParams, address kernArgs, size_t kernArgsSize,
                                      address mem) {
+  if (!kernelParams) {
+    // That means that all arguments are passed through "extra" argument of HIP
+    // kernel launch APIs, which guarantees those arguments to be consecutive
+    // in memory, i.e. we can copy them all at once.
+    std::memcpy(mem, kernArgs, kernArgsSize);
+    return true;
+  }
+
   amd::Memory** memories = reinterpret_cast<amd::Memory**>(mem + memoryObjOffset());
   for (size_t idx = 0; idx < signature_.numParameters(); ++idx) {
     KernelParameterDescriptor& desc = signature_.params()[idx];
