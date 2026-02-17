@@ -111,50 +111,36 @@ bool KernelParameters::captureAndSet(void** kernelParams, address kernArgs, size
     // That means that all arguments are passed through "extra" argument of HIP
     // kernel launch APIs, which guarantees those arguments to be consecutive
     // in memory, i.e. we can copy them all at once.
+    // Unfortunately, hipLaunchKernelGGL does not use this path.
     std::memcpy(mem, kernArgs, kernArgsSize);
     return true;
   }
 
-  amd::Memory** memories = reinterpret_cast<amd::Memory**>(mem + memoryObjOffset());
   for (size_t idx = 0; idx < signature_.numParameters(); ++idx) {
     KernelParameterDescriptor& desc = signature_.params()[idx];
-    void* value = kernelParams ? kernelParams[idx] : kernArgs + desc.offset_;
+    void* value = kernelParams[idx];
     void* param = mem + desc.offset_;
     uint32_t uint32_value = 0;
     uint64_t uint64_value = 0;
+#if 0
+    // TODO: figure how this case can be triggered and incorporate it into the
+    //       memcpy path above.
     // if using the 'extra' path and this parameter lies beyond supplied size, write zero
     if (kernelParams == nullptr && ((desc.offset_ + desc.size_) > kernArgsSize)) {
       value = &uint64_value;
     }
+#endif
     Memory* memArg = nullptr;
-    if (desc.type_ == T_POINTER && (desc.addressQualifier_ != CL_KERNEL_ARG_ADDRESS_LOCAL)) {
+    if (desc.type_ == T_POINTER) {
       LP64_SWITCH(uint32_value, uint64_value) = *(LP64_SWITCH(uint32_t*, uint64_t*))value;
-      memArg = amd::MemObjMap::FindMemObj(*reinterpret_cast<const void* const*>(value));
-      memories[desc.info_.arrayIndex_] = memArg;
-      if (memArg != nullptr) {
-        memArg->retain();
-      }
-    } else if (desc.type_ == T_SAMPLER) {
-      LogError("Cannot handle Sampler now");
-      return false;
-    } else if (desc.type_ == T_QUEUE) {
-      LogError("Cannot handle Queue now");
-      return false;
     } else {
+      assert(desc.type_ == T_VOID);
       switch (desc.size_) {
         case 4:
-          if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
-            uint32_value = desc.size_;
-          } else {
             uint32_value = *(static_cast<const uint32_t*>(value));
-          }
           break;
         case 8:
-          if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
-            uint64_value = desc.size_;
-          } else {
             uint64_value = *(static_cast<const uint64_t*>(value));
-          }
           break;
       }
     }
