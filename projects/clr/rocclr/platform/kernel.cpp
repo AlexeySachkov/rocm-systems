@@ -116,6 +116,7 @@ bool KernelParameters::captureAndSet(void** kernelParams, address kernArgs, size
     return true;
   }
 
+  amd::Memory** memories = reinterpret_cast<amd::Memory**>(mem + memoryObjOffset());
   for (size_t idx = 0; idx < signature_.numParameters(); ++idx) {
     KernelParameterDescriptor& desc = signature_.params()[idx];
     void* value = kernelParams[idx];
@@ -133,6 +134,7 @@ bool KernelParameters::captureAndSet(void** kernelParams, address kernArgs, size
     Memory* memArg = nullptr;
     if (desc.type_ == T_POINTER) {
       LP64_SWITCH(uint32_value, uint64_value) = *(LP64_SWITCH(uint32_t*, uint64_t*))value;
+      memories[desc.info_.arrayIndex_] = nullptr;
     } else {
       assert(desc.type_ == T_VOID);
       switch (desc.size_) {
