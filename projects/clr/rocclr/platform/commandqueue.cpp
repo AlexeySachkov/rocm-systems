@@ -192,6 +192,8 @@ void HostQueue::finish(bool cpu_wait) {
       return;
     }
     command->enqueue();
+    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD,
+            "Marker was enqueued with cpu_wait: %d ", batchSize < minBatchSize);
   }
 
   // Check HW status of the ROCclr event. Note: not all ROCclr modes support HW status

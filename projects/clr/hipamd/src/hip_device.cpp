@@ -77,6 +77,8 @@ bool Device::Create() {
   }
   current_managed_mem_pool_ = default_managed_mem_pool_;
 
+  assert(mem_pools_.size() == kNumBuiltinMemPools);
+
   return true;
 }
 
@@ -111,9 +113,16 @@ bool Device::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
 
 // ================================================================================================
 void Device::ReleaseFreedMemory() {
-  std::scoped_lock lock(lock_);
-  for (auto* pool : mem_pools_) {
-    pool->ReleaseFreedMemory();
+  if (mem_pools_.size() == kNumBuiltinMemPools) {
+    // There are no user-created memory pools, we can avoid using the lock
+    default_mem_pool_->ReleaseFreedMemory();
+    graph_mem_pool_->ReleaseFreedMemory();
+    default_managed_mem_pool_->ReleaseFreedMemory();
+  } else {
+    std::scoped_lock lock(lock_);
+    for (auto* pool : mem_pools_) {
+      pool->ReleaseFreedMemory();
+    }
   }
 }
 

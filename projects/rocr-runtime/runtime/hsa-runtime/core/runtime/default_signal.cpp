@@ -83,21 +83,21 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
   waiting_++;
   MAKE_SCOPE_GUARD([&]() { waiting_--; });
 
-  const uint32_t &signal_abort_timeout =
+  if (!IsValid()) return 0;
+
+  int64_t value = atomic::Load(&signal_.value, std::memory_order_relaxed);
+
+  if (CheckSignalCondition(value, condition, compare_value)) {
+    return value;
+  }
+
+  static const uint32_t &signal_abort_timeout =
     core::Runtime::runtime_singleton_->flag().signal_abort_timeout();
 
   const timer::fast_clock::time_point start_time = timer::fast_clock::now();
-  const timer::fast_clock::duration fast_timeout = timer::GetFastTimeout(timeout);
+  static const timer::fast_clock::duration fast_timeout = timer::GetFastTimeout(timeout);
 
   while (true) {
-    if (!IsValid()) return 0;
-
-    int64_t value = atomic::Load(&signal_.value, std::memory_order_relaxed);
-
-    if (CheckSignalCondition(value, condition, compare_value)) {
-      return value;
-    }
-
     if (timer::fast_clock::now() - start_time > fast_timeout) {
       return value;
     }
@@ -107,6 +107,14 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
     if (g_use_mwaitx) {
       // Use timer-enabled mwaitx for busy waiting
       timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 60000, true);
+    }
+
+    if (!IsValid()) return 0;
+
+    int64_t value = atomic::Load(&signal_.value, std::memory_order_relaxed);
+
+    if (CheckSignalCondition(value, condition, compare_value)) {
+      return value;
     }
   }
 }

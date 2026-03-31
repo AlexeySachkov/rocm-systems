@@ -64,6 +64,8 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
     // unstable, if so we return, otherwise we continue to wait in the while loop.
     while (Hsa::signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
                                      kTimeout4Secs, wait_state) != 0) {
+      ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Host !active wait for Signal = (0x%lx) for %d ns",
+              signal.handle, kTimeout4Secs);
       if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
         ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
                 "Device not Stable, while waiting for Signal ="
@@ -75,6 +77,9 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
         amd::Os::yield();
       }
     }
+      ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Host !active wait for Signal = (0x%lx) completed", signal.handle);
+  } else {
+      ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Host wait for Signal = (0x%lx) completed after first try", signal.handle);
   }
 
   return true;

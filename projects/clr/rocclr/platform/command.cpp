@@ -393,7 +393,8 @@ void Command::enqueue() {
     if (((type() == 0) && profilingInfo().batch_flush_) || (type() == CL_COMMAND_MARKER) ||
         (type() == CL_COMMAND_TASK) || queue_->ShouldFlushBatch()) {
       // The current HSA signal tracking logic requires profiling enabled for the markers
-      EnableProfiling();
+      if (!cpu_wait_)
+        EnableProfiling();
       // Update batch head for the current marker. Hence the status of all commands can be
       // updated upon the marker completion
       SetBatchHead(queue_->GetSubmissionBatch());

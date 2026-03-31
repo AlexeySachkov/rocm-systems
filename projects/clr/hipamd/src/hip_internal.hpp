@@ -525,6 +525,8 @@ namespace hip {
     }
 
   private:
+    static const size_t kNumBuiltinMemPools = 3;
+
     /// Destroy all streams on this device (called by Reset)
     void destroyAllStreams();
 

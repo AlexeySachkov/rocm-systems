@@ -488,7 +488,11 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
     // Find valid index
     ++current_id_ %= signal_list_.size();
     // Make sure the previous operation on the current signal is done
+      ClPrint(amd::LOG_INFO, amd::LOG_SIG,
+              "Before wait on signal #%d", current_id_);
     WaitCurrent();
+      ClPrint(amd::LOG_INFO, amd::LOG_SIG,
+              "After wait on signal #%d", current_id_);
 
     // Have to wait the next signal in the queue to avoid a race condition between
     // a GPU waiter(which may be not triggered yet) and CPU signal reset below
@@ -539,6 +543,8 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
     }
   }
   ProfilingSignal* prof_signal = signal_list_[current_id_];
+    ClPrint(amd::LOG_INFO, amd::LOG_SIG,
+            "ActiveSignal returns index #%d from the pool", current_id_);
   // Reset the signal and return
   Hsa::signal_silent_store_relaxed(prof_signal->signal_, init_val);
   prof_signal->flags_.done_ = false;
@@ -666,6 +672,9 @@ bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
       LogPrintfError("Failed signal [0x%lx] wait", signal->signal_);
       return false;
     }
+  } else {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "CpuWaitForSignal on completion_signal=0x%zx completed iafter the first try",
+            signal->signal_.handle);
   }
 
   // Process this signal's timing before signal reuse
@@ -1747,7 +1756,11 @@ bool VirtualGPU::releaseGpuMemoryFence(bool skip_cpu_wait) {
 
   // Check if runtime could skip CPU wait
   if (!skip_cpu_wait) {
+    ClPrint(amd::LOG_INFO, amd::LOG_SIG,
+            "Before wait on barrier");
     Barriers().WaitCurrent();
+    ClPrint(amd::LOG_INFO, amd::LOG_SIG,
+            "After wait on barrier");
 
     ResetQueueStates();
   }

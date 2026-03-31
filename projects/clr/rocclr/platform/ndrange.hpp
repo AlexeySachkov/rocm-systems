@@ -81,12 +81,14 @@ class NDRange : public EmbeddedObject {
   //! Return the product of this index space elements (size)
   inline size_t product() const;
 
+#if 0
   // Binary operators:
   inline friend NDRange operator+(const NDRange& x, const NDRange& y);
   inline friend NDRange operator-(const NDRange& x, const NDRange& y);
   inline friend NDRange operator*(const NDRange& x, const NDRange& y);
   inline friend NDRange operator/(const NDRange& x, const NDRange& y);
   inline friend NDRange operator%(const NDRange& x, const NDRange& y);
+#endif
 
   //! Return true if this index space is identical to \a x.
   bool operator==(const NDRange& x) const;
@@ -232,11 +234,13 @@ inline NDRange& NDRange::operator=(const NDRange& space) {
     return NDRange(dimensions, &result[0]);                                                        \
   }
 
+#if 0
 DEFINE_NDRANGE_BINARY_OP(+);
 DEFINE_NDRANGE_BINARY_OP(-);
 DEFINE_NDRANGE_BINARY_OP(*);
 DEFINE_NDRANGE_BINARY_OP(/);
 DEFINE_NDRANGE_BINARY_OP(%);
+#endif
 
 #undef DEFINE_NDRANGE_BINARY_OP
 
