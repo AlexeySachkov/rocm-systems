@@ -30,7 +30,8 @@ Event::Event(HostQueue& queue, bool profilingEnabled)
       device_(&queue.device()),
       profilingInfo_(profilingEnabled) {
   event_entry_scope_.store(Device::kCacheStateInvalid, std::memory_order_relaxed);
-  notified_.clear();
+  if (!AMD_DIRECT_DISPATCH)
+    notified_.clear();
 }
 
 // ================================================================================================
@@ -41,7 +42,8 @@ Event::Event()
       notify_event_(nullptr),
       device_(nullptr) {
   event_entry_scope_.store(Device::kCacheStateInvalid, std::memory_order_relaxed);
-  notified_.clear();
+  if (!AMD_DIRECT_DISPATCH)
+    notified_.clear();
 }
 
 // ================================================================================================
@@ -264,7 +266,7 @@ bool Event::awaitCompletion() {
 bool Event::notifyCmdQueue(bool cpu_wait) {
   HostQueue* queue = command().queue();
   if (AMD_DIRECT_DISPATCH) {
-    ScopedLock l(notify_lock_);
+    std::scoped_lock l(notify_lock_);
     if ((status() > CL_COMPLETE) && (nullptr != queue) &&
         // If HW event was assigned, then notification can be ignored, since a barrier was issued
         // @note: Force the marker always in OCL for now, since OCL events require precise
