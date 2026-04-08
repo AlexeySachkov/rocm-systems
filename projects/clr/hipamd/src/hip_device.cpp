@@ -252,6 +252,7 @@ void Device::destroyAllStreams() {
 // ================================================================================================
 void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
   // Make a local copy to avoid stalls for GPU finish with multiple threads
+#if 0
   std::vector<hip::Stream*> streams;
   {
     std::shared_lock lock(streamSetLock_);
@@ -280,8 +281,22 @@ void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
     stream->finish(cpu_wait);
     stream->release();
   }
+#else
+  auto* null_stream = GetNullStream();
+  for (auto* stream : streamSet_) {
+    if (wait_blocking_streams_only) {
+      if (stream != null_stream && (stream->Flags() & hipStreamNonBlocking) == 0) {
+        stream->finish(cpu_wait);
+      }
+    } else {
+      stream->finish(cpu_wait);
+    }
+  }
+  if (wait_blocking_streams_only && null_stream != nullptr)
+    null_stream->finish(cpu_wait);
+#endif
   // Release freed memory for all memory pools on the device
-  ReleaseFreedMemory();
+  // ReleaseFreedMemory();
 }
 
 // ================================================================================================

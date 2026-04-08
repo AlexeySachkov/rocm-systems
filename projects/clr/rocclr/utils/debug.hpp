@@ -147,6 +147,7 @@ inline void warning(const char* msg) { amd::report_warning(msg); }
 #define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #endif
 
+#if 0
 #define Log(level, msg)                                                                            \
   do {                                                                                             \
     if (AMD_LOG_LEVEL >= level) {                                                                  \
@@ -181,6 +182,13 @@ inline void warning(const char* msg) { amd::report_warning(msg); }
       guarantee(cond);                                                                             \
     }                                                                                              \
   } while (false)
+#else
+#define Log(level, msg)
+#define LogTS(level, msg)
+#define Logf(level, format, ...)
+#define CondLog(cond, msg)
+#define LogGuarantee(cond, level, msg)
+#endif
 
 
 #define LogTSInfo(msg) LogTS(amd::LOG_INFO, msg)
@@ -195,7 +203,7 @@ inline void warning(const char* msg) { amd::report_warning(msg); }
 #endif
 
 // You may define CL_LOG to enable following log functions even for release build
-#define CL_LOG
+#undef CL_LOG
 
 #ifdef CL_LOG
 #define ClPrint(level, mask, format, ...)                                                          \
@@ -255,6 +263,7 @@ inline void warning(const char* msg) { amd::report_warning(msg); }
 #define LogPrintfWarning(format, ...)                                                              \
   ClPrint(amd::LOG_WARNING, amd::LOG_ALWAYS, format, ##__VA_ARGS__)
 #define LogPrintfInfo(format, ...) ClPrint(amd::LOG_INFO, amd::LOG_ALWAYS, format, ##__VA_ARGS__)
+#define IsLogEnabled(level, mask) (false)
 
 
 #endif /*DEBUG_HPP_*/

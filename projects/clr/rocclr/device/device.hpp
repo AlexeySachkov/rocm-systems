@@ -2215,6 +2215,8 @@ class Device : public RuntimeObject {
   //! Finds a memory object by device virtual address for this device
   amd::Memory* FindDevMemObj(const void* k, size_t* offset = nullptr) const;
 
+
+
   device::Info info_;           //!< Device info structure
   device::Settings* settings_;  //!< Device settings
   union {

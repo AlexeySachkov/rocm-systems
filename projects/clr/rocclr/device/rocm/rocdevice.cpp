@@ -3083,7 +3083,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
           "size %d with priority %d, cooperative: %i",
           queue, queue->base_address, queue_size, queue_priority, coop_queue);
 
-  Hsa::profiling_set_profiler_enabled(queue, 1);
+  // Hsa::profiling_set_profiler_enabled(queue, 1);
   if (cuMask.size() != 0 || info_.globalCUMask_.size() != 0) {
     std::stringstream ss;
     ss << std::hex;

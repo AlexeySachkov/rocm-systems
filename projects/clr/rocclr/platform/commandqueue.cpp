@@ -219,7 +219,7 @@ void HostQueue::finish(bool cpu_wait) {
     // Runtime can clear the last command only if no other submissions occured
     // during finish()
     if (command == lastEnqueueCommand_) {
-      device_.removeFromActiveQueues(this);
+      // device_.removeFromActiveQueues(this);
       // Under Windows runtime can't destroy objects in the callback thread.
       // Also runtime should force interrupt before any destroy. Hence, if it was just gpu wait,
       // then keep the lastEnqueueCommand_ for the interrupt handling.
@@ -330,8 +330,6 @@ void HostQueue::append(Command& command) {
 
   // Attach only real commands and skip internal notifications for CPU queue
   if (command.waitingEvent() == nullptr) {
-    command.retain();
-
     // lastCmdLock_ ensures that lastEnqueueCommand() can retain the command before it is swapped
     // out. We want to keep this critical section as short as possible, so the command should be
     // released outside this section.
