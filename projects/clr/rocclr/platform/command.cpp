@@ -123,7 +123,7 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
     // the event is irrelevant, during the actual callback. At the same time HIP API requires
     // to finish the callback before HIP stream can continue. Hence runtime has to process
     // the callback first and then update the status.
-    if (callbacks_ != (CallBackEntry*)0) {
+    if (callbacks_.load(std::memory_order_relaxed) != nullptr) {
       processCallbacks(status);
     }
     if (!status_.compare_exchange_strong(currentStatus, status, std::memory_order_relaxed)) {
@@ -135,7 +135,7 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
       // Somebody else beat us to it, let them deal with the release/signal.
       return false;
     }
-    if (callbacks_ != (CallBackEntry*)0) {
+    if (callbacks_.load(std::memory_order_relaxed) != nullptr) {
       processCallbacks(status);
     }
   }

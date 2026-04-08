@@ -2996,7 +2996,9 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     qIndex = QueuePriority::Normal;
   }
 
-  { // Lock
+  // Attempt to re-use an existing queue (unless it is a cooperative queue which
+  // are single per device).
+  if (!coop_queue && (cuMask.size() == 0)) { // Lock
     amd::ScopedLock l(active_queue_access_);
 
     assert(queuePool_[QueuePriority::Low].size() <= settings().max_hw_queues_ ||
@@ -3010,16 +3012,14 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
             queuePool_[QueuePriority::High].size(), settings().max_hw_queues_);
 
     // If we have reached the max number of queues, reuse an existing queue with the matching queue
-    // priority, choosing the one with the least number of users. Note: Don't attempt to reuse the
-    // cooperative queue, since it's single per device.
-
+    // priority, choosing the one with the least number of users.
+    //
     // num_queues_[qIndex] tracks persistent (non-managed) queues per priority.
     // When the total queues (managed + non-managed) exceed max_hw_queues_, we must reuse existing
     // queues. 'managed' streams do not increment num_queues_, allowing them to use the
     // pool without permanently consuming slots. ReleaseActiveQueue() uses this counter to
     // decide when to start reclaiming queues.
-    if (!coop_queue && (cuMask.size() == 0) &&
-        (queuePool_[qIndex].size() >= settings().max_hw_queues_)) {
+    if (queuePool_[qIndex].size() >= settings().max_hw_queues_) {
       hsa_queue_t* queue = getQueueFromPool(qIndex, false);
       if (queue != nullptr) {
         if (!managed) {
@@ -3085,8 +3085,6 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
 
   // Hsa::profiling_set_profiler_enabled(queue, 1);
   if (cuMask.size() != 0 || info_.globalCUMask_.size() != 0) {
-    std::stringstream ss;
-    ss << std::hex;
     std::vector<uint32_t> mask = {};
 
     // handle scenarios where cuMask (custom-defined), globalCUMask_ or both are valid and
@@ -3094,7 +3092,9 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     if (cuMask.size() != 0 && info_.globalCUMask_.size() == 0) {
       mask = cuMask;
     } else if (cuMask.size() != 0 && info_.globalCUMask_.size() != 0) {
-      for (unsigned int i = 0; i < std::min(cuMask.size(), info_.globalCUMask_.size()); i++) {
+      size_t minSize = std::min(cuMask.size(), info_.globalCUMask_.size());
+      mask.reserve(minSize);
+      for (unsigned int i = 0; i < minSize; i++) {
         mask.push_back(cuMask[i] & info_.globalCUMask_[i]);
       }
       // check to make sure after ANDing cuMask (custom-defined) with global
@@ -3114,11 +3114,15 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     }
 
 
-    for (int i = mask.size() - 1; i >= 0; i--) {
-      ss << std::setfill('0') << std::setw(8) << mask[i];
+    if (IsLogEnabled(amd::LOG_INFO, amd::LOG_QUEUE)) {
+      std::stringstream ss;
+      ss << std::hex;
+      for (int i = mask.size() - 1; i >= 0; i--) {
+        ss << std::setfill('0') << std::setw(8) << mask[i];
+      }
+      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Setting CU mask 0x%s for hardware queue %p",
+              ss.str().c_str(), queue->base_address);
     }
-    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Setting CU mask 0x%s for hardware queue %p",
-            ss.str().c_str(), queue->base_address);
 
     std::vector<uint32_t> final_mask = {};
     // hsa_amd_queue_cu_set_mask expects each bit in cuMask to represent each CU
@@ -3141,7 +3145,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
         }
       }
     } else {
-      final_mask = mask;
+      final_mask = std::move(mask);
     }
 
     hsa_status_t status =
