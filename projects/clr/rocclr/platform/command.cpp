@@ -160,13 +160,15 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
       signal();
     }
 
-    if (profilingInfo().enabled_) {
-      ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command %p complete (Wall: %ld, CPU: %ld, GPU: %ld us)",
-              &command(), ((profilingInfo().end_ - epoch) / 1000),
-              ((profilingInfo().submitted_ - profilingInfo().queued_) / 1000),
-              ((profilingInfo().end_ - profilingInfo().start_) / 1000));
-    } else {
-      ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command %p complete", &command());
+    if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_CMD)) {
+       if (profilingInfo().enabled_) {
+        ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command %p complete (Wall: %ld, CPU: %ld, GPU: %ld us)",
+                &command(), ((profilingInfo().end_ - epoch) / 1000),
+                ((profilingInfo().submitted_ - profilingInfo().queued_) / 1000),
+                ((profilingInfo().end_ - profilingInfo().start_) / 1000));
+      } else {
+        ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command %p complete", &command());
+      }
     }
     release();
   }
@@ -394,7 +396,8 @@ void Command::enqueue() {
     if (((type() == 0) && profilingInfo().batch_flush_) || (type() == CL_COMMAND_MARKER) ||
         (type() == CL_COMMAND_TASK)) {
       // The current HSA signal tracking logic requires profiling enabled for the markers
-      EnableProfiling();
+      if (!cpu_wait_)
+        EnableProfiling();
       // Update batch head for the current marker. Hence the status of all commands can be
       // updated upon the marker completion
       SetBatchHead(queue_->GetSubmissionBatch());

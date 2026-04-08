@@ -271,7 +271,7 @@ class HostQueue : public CommandQueue {
       lastEnqueueCommand_->release();
     } else {
       // The queue becomes active. Add it to the set of activeQueues.
-      device_.addToActiveQueues(this);
+      // device_.addToActiveQueues(this);
     }
 
     // Extra retain for the last command
