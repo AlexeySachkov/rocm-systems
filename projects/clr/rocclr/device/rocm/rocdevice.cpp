@@ -2998,7 +2998,8 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
 
   // Attempt to re-use an existing queue (unless it is a cooperative queue which
   // are single per device).
-  if (!coop_queue && (cuMask.size() == 0)) { // Lock
+  if (!coop_queue && (cuMask.size() == 0) &&
+      queuePool_[qIndex].size() >= settings().max_hw_queues_) {  // Lock
     amd::ScopedLock l(active_queue_access_);
 
     assert(queuePool_[QueuePriority::Low].size() <= settings().max_hw_queues_ ||
@@ -3028,7 +3029,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
         return queue;
       }
     }
-  } // Lock release
+  }  // Lock release
 
   // Create a new queue.
   uint32_t queue_max_packets = 0;
