@@ -77,7 +77,7 @@ class Event : public RuntimeObject {
 
   void* hw_event_;        //!< HW event ID associated with SW event
   std::atomic<Event*> notify_event_;   //!< Notify event, which should contain HW signal
-  std::atomic<int32_t> event_entry_scope_;  //!< Command entry scope
+  std::atomic<int32_t> event_entry_scope_ = Device::kCacheStateInvalid;  //!< Command entry scope
                                             //!< 2 - system scope, 1 - device scope,
                                             //!< 0 - ignore, -1 - invalid
   std::vector<void*> dep_hw_events_;  //!< Dependent HW events associated with SW event

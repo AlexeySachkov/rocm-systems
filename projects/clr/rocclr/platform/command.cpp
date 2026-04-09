@@ -29,7 +29,7 @@ Event::Event(HostQueue& queue, bool profilingEnabled)
       notify_event_(nullptr),
       device_(&queue.device()),
       profilingInfo_(profilingEnabled) {
-  event_entry_scope_.store(Device::kCacheStateInvalid, std::memory_order_relaxed);
+  // event_entry_scope_.store(Device::kCacheStateInvalid, std::memory_order_relaxed);
   if (!AMD_DIRECT_DISPATCH)
     notified_.clear();
 }
@@ -41,7 +41,7 @@ Event::Event()
       hw_event_(nullptr),
       notify_event_(nullptr),
       device_(nullptr) {
-  event_entry_scope_.store(Device::kCacheStateInvalid, std::memory_order_relaxed);
+  // event_entry_scope_.store(Device::kCacheStateInvalid, std::memory_order_relaxed);
   if (!AMD_DIRECT_DISPATCH)
     notified_.clear();
 }
