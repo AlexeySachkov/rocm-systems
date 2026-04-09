@@ -62,13 +62,14 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   Timestamp* ts_;         //!< Timestamp object associated with the signal
   HwQueueEngine engine_;  //!< Engine used with this signal
   std::recursive_mutex lock_;  //!< Signal lock for update
+  std::atomic<bool> done_;
 
   typedef union {
     struct {
-      uint32_t done_ : 1;              //!< True if signal is done
+      // uint32_t done_ : 1;              //!< True if signal is done
       uint32_t isPacketDispatch_ : 1;  //!< True if the packet, used with the signal, is dispatch
       uint32_t interrupt_ : 1;         //!< True if the signal will trigger an interrupt
-      uint32_t reserved_ : 29;
+      uint32_t reserved_ : 30;
     };
     uint32_t data_;
   } Flags;
@@ -86,7 +87,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   ProfilingSignal() : ts_(nullptr), engine_(HwQueueEngine::Compute) {
     signal_.handle = 0;
     flags_.data_ = 0;
-    flags_.done_ = true;
+    done_.store(true, std::memory_order_relaxed);
   }
 
   virtual ~ProfilingSignal();

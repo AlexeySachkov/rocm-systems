@@ -161,7 +161,7 @@ void Timestamp::checkGpuTime(ProfilingSignal* single_signal) {
     // Process either single signal or all signals
     auto process_signal = [&](ProfilingSignal* sig) {
       // Skip signals already processed
-      if (sig->flags_.done_) {
+      if (sig->done_.load(std::memory_order_relaxed)) {
         return;
       }
 
@@ -244,7 +244,7 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
     static_cast<amd::AccumulateCommand&>(command()).addTimestamps(sig_start, sig_end);
   }
 
-  signal->flags_.done_ = true;
+  signal->done_.store(true, std::memory_order_relaxed);
 }
 
 // ================================================================================================
@@ -544,7 +544,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   ProfilingSignal* prof_signal = signal_list_[current_id_];
   // Reset the signal and return
   Hsa::signal_silent_store_relaxed(prof_signal->signal_, init_val);
-  prof_signal->flags_.done_ = false;
+  prof_signal->done_.store(false, std::memory_order_relaxed);
   prof_signal->engine_ = engine_;
   prof_signal->flags_.isPacketDispatch_ = false;
   prof_signal->ResetCachedTiming();
@@ -679,8 +679,7 @@ bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
     signal->ts_ = nullptr;
   } else {
     // No timestamp - just mark signal as done
-    std::scoped_lock lock(signal->LockSignalOps());
-    signal->flags_.done_ = true;
+    signal->done_.store(true, std::memory_order_relaxed);
   }
 
   return true;
@@ -2285,7 +2284,7 @@ void VirtualGPU::updateCommandsState(amd::Command* list) const {
     }
 
     next = current->getNext();
-    current->release();
+    // current->release();
     current = next;
   }
 }

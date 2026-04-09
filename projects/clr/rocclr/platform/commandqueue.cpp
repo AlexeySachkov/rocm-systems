@@ -213,20 +213,27 @@ void HostQueue::finish(bool cpu_wait) {
             minBatchSize);
     command->awaitCompletion();
   }
-  if (IS_HIP) {
-    std::scoped_lock sl(vdev()->execution());
-    ScopedLock l(lastCmdLock_);
-    // Runtime can clear the last command only if no other submissions occured
-    // during finish()
-    if (command == lastEnqueueCommand_) {
-      // device_.removeFromActiveQueues(this);
-      // Under Windows runtime can't destroy objects in the callback thread.
-      // Also runtime should force interrupt before any destroy. Hence, if it was just gpu wait,
-      // then keep the lastEnqueueCommand_ for the interrupt handling.
-      if (IS_LINUX || cpu_wait || GPU_ENABLE_PAL != 0) {
+
+  // Under Windows runtime can't destroy objects in the callback thread.
+  // Also runtime should force interrupt before any destroy. Hence, if it was just gpu wait,
+  // then keep the lastEnqueueCommand_ for the interrupt handling.
+  if (IS_HIP && (IS_LINUX || cpu_wait || GPU_ENABLE_PAL != 0)) {
+    const auto resetLastCommand = [&]() {
+      // Runtime can clear the last command only if no other submissions occured
+      // during finish()
+      if (command == lastEnqueueCommand_) {
+        // device_.removeFromActiveQueues(this);
         lastEnqueueCommand_->release();
         lastEnqueueCommand_ = nullptr;
       }
+    };
+
+    if (AMD_DIRECT_DISPATCH) {
+      std::scoped_lock sl(vdev()->execution());
+      resetLastCommand();
+    } else {
+      ScopedLock l(lastCmdLock_);
+      resetLastCommand();
     }
   }
   // Release SDMA engine assignments
