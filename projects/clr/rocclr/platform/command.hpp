@@ -22,6 +22,7 @@
 #include "platform/threadtrace.hpp"
 #include "platform/activity.hpp"
 #include "platform/command_utils.hpp"
+#include <hsa/hsa.h>
 
 #include "CL/cl_ext.h"
 
@@ -199,6 +200,8 @@ class Event : public RuntimeObject {
 
   //! Saves HW event, associated with the current command
   void SetHwEvent(void* hw_event) { hw_event_ = hw_event; }
+
+  hsa_signal_t completion_signal_ = {.handle = 0};
 
   //! Returns HW event, associated with the current command
   void* HwEvent() const { return hw_event_; }

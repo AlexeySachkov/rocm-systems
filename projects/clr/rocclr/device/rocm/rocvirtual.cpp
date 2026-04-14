@@ -714,6 +714,8 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
                                    size_t& ldsAddress, bool cooperativeGroups,
                                    bool& imageBufferWrtBack,
                                    std::vector<device::Memory*>& wrtBackImageBuffer) {
+  if (amd::IS_HIP)
+    return true; // part of  https://github.com/ROCm/rocm-systems/pull/4638
   Kernel& hsaKernel =
       const_cast<Kernel&>(static_cast<const Kernel&>(*(kernel.getDeviceKernel(dev()))));
   const amd::KernelSignature& signature = kernel.signature();
@@ -4140,9 +4142,11 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   } else {
     if (!dispatchAqlPacket(&dispatchPacket, aqlHeaderWithOrder,
                            (sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS),
-                           GPU_FLUSH_ON_EXECUTION, false, nullptr, attach_signal)) {
+                           GPU_FLUSH_ON_EXECUTION, false, nullptr, /* attach signal = */attach_signal || vcmd)) {
       return false;
     }
+    if (vcmd != nullptr)
+      vcmd->completion_signal_ = dispatchPacket.completion_signal;
   }
 
   // Output printf buffer

@@ -502,6 +502,30 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   int deviceId = hip::Stream::DeviceId(hStream);
   const amd::Device* device = g_devices[deviceId]->devices()[0];
 
+  // Hack to accept raw host function pointers in here.
+  // hipGetFuncBySymbol doesn't help, because kernel names are mangled
+  const auto [hip_error, func] = [&]() -> std::pair<hipError_t, hipFunction_t> {
+    hipFunction_t ff;
+    const hipError_t err = PlatformState::Instance().StatCO().GetFunc(&ff, reinterpret_cast<const void *>(f), deviceId);
+
+    // Propagate specific invalid code object errors
+    if (err == hipErrorInvalidKernelFile || err == hipErrorInvalidDeviceFunction ||
+        err == hipErrorInvalidImage) {
+      return {err, nullptr};
+    }
+
+    // If successful lookup with valid function, use it
+    if (err == hipSuccess && ff) {
+      return {hipSuccess, ff};
+    }
+
+    // Fallback: assume it's a hip function type
+    return {hipSuccess, f};
+  }();
+  if (hip_error != hipSuccess)
+    return hip_error;
+  f = func;
+
   STREAM_CAPTURE(hipModuleLaunchKernel, hStream, f, gridDimX, gridDimY, gridDimZ, blockDimX,
                  blockDimY, blockDimZ, sharedMemBytes, kernelParams, extra);
 

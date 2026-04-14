@@ -92,6 +92,19 @@ address KernelParameters::alloc(device::VirtualDevice& vDev) {
 // =================================================================================================
 bool KernelParameters::captureHIPArgs(void** kernelParams, address kernArgs, size_t kernArgsSize,
                                       address mem) {
+  // using 'fast' extra path
+  if (!kernelParams) {
+    assert(kernArgs);
+    std::memcpy(mem, kernelParams, kernArgsSize);
+    // VirtualGPU::processMemObjects may dereference memories section of kernel
+    // arguments. That is needed for blit kernels, but shouldn't be necessary
+    // for regular kernels. To avoid the memset, some re-arrangment of 'if'
+    // statements within processMemObjects may be necessary.
+    // amd::Memory** memories = reinterpret_cast<amd::Memory**>(mem + memoryObjOffset());
+    // std::memset(memories, 0, signature_.numMemories() * sizeof(address));
+    return true;
+  }
+
   amd::Memory** memories = reinterpret_cast<amd::Memory**>(mem + memoryObjOffset());
   for (size_t idx = 0; idx < signature_.numParameters(); ++idx) {
     KernelParameterDescriptor& desc = signature_.params()[idx];

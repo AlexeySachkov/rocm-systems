@@ -18,8 +18,10 @@
 #if !defined(__HIPCC_RTC__)
 #ifdef __cplusplus
 #include <cstddef>
+#include <cstring>
 #else
 #include <stddef.h>
+#include <string.h>
 #endif  // __cplusplus
 #endif  // !defined(__HIPCC_RTC__)
 
@@ -193,20 +195,75 @@ std::tuple<Formals...> validateArgsCountType(void (*kernel)(Formals...),
   std::tuple<Formals...> to_formals{std::move(actuals)};
   return to_formals;
 }
+#include <hip/hip_runtime_api.h>
 
 #if defined(HIP_TEMPLATE_KERNEL_LAUNCH)
-template <typename... Args, typename F = void (*)(Args...)>
-void hipLaunchKernelGGL(F kernel, const dim3& numBlocks, const dim3& dimBlocks,
-                        std::uint32_t sharedMemBytes, hipStream_t stream, Args... args) {
-  constexpr size_t count = sizeof...(Args);
-  auto tup_ = std::tuple<Args...>{args...};
-  auto tup = validateArgsCountType(kernel, tup_);
-  void* _Args[count];
-  pArgs<0>(tup, _Args);
+namespace hip_impl {
 
-  auto k = reinterpret_cast<void*>(kernel);
-  hipLaunchKernel(k, numBlocks, dimBlocks, _Args, sharedMemBytes, stream);
+constexpr size_t alignTo(size_t V, size_t Align) {
+  size_t B = (V != 0);
+  size_t M = (V - B) / Align + B;
+  return M * Align;
 }
+
+template<typename T, typename... Rest>
+inline constexpr size_t calculate_total_args_size_impl(size_t Offset) {
+  // T is a type of the next argument
+  Offset = alignTo(Offset, sizeof(T)) + sizeof(T);
+  if constexpr (sizeof...(Rest) == 0)
+    return Offset;
+  else
+    return calculate_total_args_size_impl<Rest...>(Offset);
+}
+
+template<typename... Args>
+inline constexpr size_t calculate_total_args_size() {
+  return calculate_total_args_size_impl<Args...>(0);
+}
+
+
+template<size_t Index, typename... Args>
+inline void package_args_impl(const std::tuple<Args...> &args, char *Storage, size_t Offset) {
+  if constexpr (Index < sizeof...(Args)) {
+    using ElemType = typename std::tuple_element<Index, std::tuple<Args...>>::type;
+    size_t ElemSize = sizeof(ElemType);
+    Offset = alignTo(Offset, ElemSize);
+    // memcpy vs direct store doesn't matter much
+    auto *Ptr = reinterpret_cast<ElemType *>(Storage + Offset);
+    *Ptr = std::get<Index>(args);
+    // std::memcpy(Storage + Offset, &std::get<Index>(args), ElemSize);
+    Offset += ElemSize;
+    package_args_impl<Index + 1>(args, Storage, Offset);
+  }
+}
+
+template<typename... Args>
+inline void package_args(const std::tuple<Args...> &args, char *Storage) {
+  package_args_impl<0>(args, Storage, 0);
+}
+
+}  // Namespace hip_impl.
+
+template <typename... Args, typename F = void (*)(Args...)>
+void hipLaunchKernelGGLMyOwn(F kernel, const dim3& numBlocks, const dim3& dimBlocks,
+                        std::uint32_t sharedMemBytes, hipStream_t stream, Args... args) {
+  constexpr size_t size = hip_impl::calculate_total_args_size<Args...>();
+  char storage[size];
+  // std::vector<char> storage;
+  // storage.resize(hip_impl::calculate_total_args_size<Args...>());
+  hip_impl::package_args(std::tuple<Args...>{std::move(args)...}, storage); //.data());
+  std::size_t kernarg_size = size; // storage.size();
+
+  void* config[]{HIP_LAUNCH_PARAM_BUFFER_POINTER, storage /*.data()*/, HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                 &kernarg_size, HIP_LAUNCH_PARAM_END};
+
+  hipModuleLaunchKernel(reinterpret_cast<hipFunction_t>(kernel), numBlocks.x, numBlocks.y,
+                        numBlocks.z, dimBlocks.x, dimBlocks.y, dimBlocks.z, sharedMemBytes, stream,
+                        nullptr, &config[0]);
+}
+
+#define hipLaunchKernelGGL(kernelName, ...) hipLaunchKernelGGLMyOwn(kernelName, __VA_ARGS__)
+
 #else
 #define hipLaunchKernelGGLInternal(kernelName, numBlocks, numThreads, memPerBlock, streamId, ...)  \
   do {                                                                                             \
@@ -216,7 +273,6 @@ void hipLaunchKernelGGL(F kernel, const dim3& numBlocks, const dim3& dimBlocks,
 #define hipLaunchKernelGGL(kernelName, ...) hipLaunchKernelGGLInternal((kernelName), __VA_ARGS__)
 #endif
 
-#include <hip/hip_runtime_api.h>
 #endif  // !defined(__HIPCC_RTC__)
 
 #if defined(__HIPCC_RTC__)

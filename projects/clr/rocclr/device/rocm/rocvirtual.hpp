@@ -15,6 +15,7 @@
 #include "rocsched.hpp"
 #include "device/device.hpp"
 #include "os/os.hpp"
+#include <hsa/hsa.h>
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -390,6 +391,10 @@ class VirtualGPU : public device::VirtualDevice {
   virtual void ReleaseSdmaEngines() final;  //!< Release SDMA engine assignments
   virtual void ReleaseAllHwQueues() final;
   virtual void ReleaseHwQueue() final;
+
+  void WaitForSignalPublic(hsa_signal_t signal) {
+    amd::roc::WaitForSignal(signal, /* active_wait = */false, /* yield = */true);
+  }
 
   /**
    * @brief Waits on an outstanding kernel without regard to how

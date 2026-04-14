@@ -21,6 +21,7 @@
 #include "devkernel.hpp"
 #include "amdocl/cl_profile_amd.h"
 #include "devsignal.hpp"
+#include <hsa/hsa.h>
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
@@ -1299,6 +1300,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void ReleaseSdmaEngines() {}  //!< Release SDMA engine assignments (ROCm specific)
   virtual void ReleaseAllHwQueues() {}
   virtual void ReleaseHwQueue() {}
+
+  virtual void WaitForSignalPublic(hsa_signal_t){}
 
   //! Get the blit manager object
   device::BlitManager& blitMgr() const { return *blitMgr_; }

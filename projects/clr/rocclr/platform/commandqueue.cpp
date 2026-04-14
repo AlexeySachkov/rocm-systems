@@ -190,8 +190,10 @@ void HostQueue::finish(bool cpu_wait) {
           "fence dirty: %d",
           batchSize, cpu_wait, vdev()->isFenceDirty());
 
-  // Force marker if the batch wasn't sent for CPU update or fence is dirty
-  if (nullptr == command || (batchSize != 0)|| vdev()->isFenceDirty()) {
+  if (command && command->completion_signal_.handle != 0) {
+    vdev()->WaitForSignalPublic(command->completion_signal_);
+  } else if (nullptr == command || (batchSize != 0)|| vdev()->isFenceDirty()) {
+    // Force marker if the batch wasn't sent for CPU update or fence is dirty
     if (nullptr != command) {
       command->release();
     }
