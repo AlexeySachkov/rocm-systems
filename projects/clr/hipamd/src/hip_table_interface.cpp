@@ -1383,6 +1383,13 @@ extern "C" hipError_t hipLaunchKernel(const void* function_address, dim3 numBloc
                                                         args, sharedMemBytes, stream);
   CATCH;
 }
+extern "C" hipError_t hipLaunchKernelBundledArgs(const void* function_address, dim3 numBlocks, dim3 dimBlocks,
+                                      void* args, size_t argsSize, size_t sharedMemBytes, hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipLaunchKernelBundledArgs_fn(function_address, numBlocks, dimBlocks,
+                                                        args, argsSize, sharedMemBytes, stream);
+  CATCH;
+}
 hipError_t hipMalloc(void** ptr, size_t size) {
   TRY;
   return hip::GetHipDispatchTable()->hipMalloc_fn(ptr, size);

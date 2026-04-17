@@ -655,6 +655,7 @@ global:
     hipKernelSetAttribute;
     hipKernelGetFunction;
     hipMemPrefetchBatchAsync;
+    hipLaunchKernelBundledArgs;
 local:
     *;
 } hip_7.1;

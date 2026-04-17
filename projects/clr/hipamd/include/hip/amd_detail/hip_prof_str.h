@@ -483,7 +483,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipKernelSetAttribute = 458,
   HIP_API_ID_hipKernelGetFunction = 459,
   HIP_API_ID_hipMemPrefetchBatchAsync = 460,
-  HIP_API_ID_LAST = 460,
+  HIP_API_ID_hipLaunchKernelBundledArgs = 461,
+  HIP_API_ID_LAST = 461,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -761,6 +762,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipLaunchCooperativeKernelMultiDevice: return "hipLaunchCooperativeKernelMultiDevice";
     case HIP_API_ID_hipLaunchHostFunc: return "hipLaunchHostFunc";
     case HIP_API_ID_hipLaunchKernel: return "hipLaunchKernel";
+    case HIP_API_ID_hipLaunchKernelBundledArgs: return "hipLaunchKernelBundledArgs";
     case HIP_API_ID_hipLaunchKernelExC: return "hipLaunchKernelExC";
     case HIP_API_ID_hipLibraryEnumerateKernels: return "hipLibraryEnumerateKernels";
     case HIP_API_ID_hipLibraryGetKernel: return "hipLibraryGetKernel";
@@ -1215,6 +1217,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipLaunchCooperativeKernelMultiDevice", name) == 0) return HIP_API_ID_hipLaunchCooperativeKernelMultiDevice;
   if (strcmp("hipLaunchHostFunc", name) == 0) return HIP_API_ID_hipLaunchHostFunc;
   if (strcmp("hipLaunchKernel", name) == 0) return HIP_API_ID_hipLaunchKernel;
+  if (strcmp("hipLaunchKernelBundledArgs", name) == 0) return HIP_API_ID_hipLaunchKernelBundledArgs;
   if (strcmp("hipLaunchKernelExC", name) == 0) return HIP_API_ID_hipLaunchKernelExC;
   if (strcmp("hipLibraryEnumerateKernels", name) == 0) return HIP_API_ID_hipLibraryEnumerateKernels;
   if (strcmp("hipLibraryGetKernel", name) == 0) return HIP_API_ID_hipLibraryGetKernel;
@@ -2795,6 +2798,15 @@ typedef struct hip_api_data_s {
       size_t sharedMemBytes;
       hipStream_t stream;
     } hipLaunchKernel;
+    struct {
+      const void* hostFunction;
+      dim3 gridDim;
+      dim3 blockDim;
+      void* args;
+      size_t argsSize;
+      size_t sharedMemBytes;
+      hipStream_t stream;
+    } hipLaunchKernelBundledArgs;
     struct {
       const hipLaunchConfig_t* config;
       hipLaunchConfig_t config__val;
@@ -5526,6 +5538,16 @@ typedef struct hip_api_data_s {
   cb_data.args.hipLaunchKernel.sharedMemBytes = (size_t)sharedMemBytes; \
   cb_data.args.hipLaunchKernel.stream = (hipStream_t)stream; \
 };
+// hipLaunchKernelBundledArgs[('const void*', 'hostFunction'), ('dim3', 'gridDim'), ('dim3', 'blockDim'), ('void*', 'args'), ('size_t', 'argsSize'), ('size_t', 'sharedMemBytes'), ('hipStream_t', 'stream')]
+#define INIT_hipLaunchKernelBundledArgs_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipLaunchKernelBundledArgs.hostFunction = (const void*)hostFunction; \
+  cb_data.args.hipLaunchKernelBundledArgs.gridDim = (dim3)gridDim; \
+  cb_data.args.hipLaunchKernelBundledArgs.blockDim = (dim3)blockDim; \
+  cb_data.args.hipLaunchKernelBundledArgs.args = (void*)args; \
+  cb_data.args.hipLaunchKernelBundledArgs.argsSize = (size_t)argsSize; \
+  cb_data.args.hipLaunchKernelBundledArgs.sharedMemBytes = (size_t)sharedMemBytes; \
+  cb_data.args.hipLaunchKernelBundledArgs.stream = (hipStream_t)stream; \
+};
 // hipLaunchKernelExC[('const hipLaunchConfig_t*', 'config'), ('const void*', 'fPtr'), ('void**', 'args')]
 #define INIT_hipLaunchKernelExC_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipLaunchKernelExC.config = (const hipLaunchConfig_t*)config; \
@@ -7909,6 +7931,9 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipLaunchKernel[('const void*', 'function_address'), ('dim3', 'numBlocks'), ('dim3', 'dimBlocks'), ('void**', 'args'), ('size_t', 'sharedMemBytes'), ('hipStream_t', 'stream')]
     case HIP_API_ID_hipLaunchKernel:
       if (data->args.hipLaunchKernel.args) data->args.hipLaunchKernel.args__val = *(data->args.hipLaunchKernel.args);
+      break;
+// hipLaunchKernelBundledArgs[('const void*', 'hostFunction'), ('dim3', 'gridDim'), ('dim3', 'blockDim'), ('void*', 'args'), ('size_t', 'argsSize'), ('size_t', 'sharedMemBytes'), ('hipStream_t', 'stream')]
+    case HIP_API_ID_hipLaunchKernelBundledArgs:
       break;
 // hipLaunchKernelExC[('const hipLaunchConfig_t*', 'config'), ('const void*', 'fPtr'), ('void**', 'args')]
     case HIP_API_ID_hipLaunchKernelExC:
@@ -10592,6 +10617,17 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", args="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLaunchKernel.args__val); }
       oss << ", sharedMemBytes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLaunchKernel.sharedMemBytes);
       oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLaunchKernel.stream);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipLaunchKernelBundledArgs:
+      oss << "hipLaunchKernelBundledArgs(";
+      oss << "hostFunction="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLaunchKernelBundledArgs.hostFunction);
+      oss << ", gridDim="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLaunchKernelBundledArgs.gridDim);
+      oss << ", blockDim="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLaunchKernelBundledArgs.blockDim);
+      oss << ", args="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLaunchKernelBundledArgs.args);
+      oss << ", argsSize="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLaunchKernelBundledArgs.argsSize);
+      oss << ", sharedMemBytes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLaunchKernelBundledArgs.sharedMemBytes);
+      oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLaunchKernelBundledArgs.stream);
       oss << ")";
     break;
     case HIP_API_ID_hipLaunchKernelExC:

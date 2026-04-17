@@ -7211,6 +7211,8 @@ hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* shar
 hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks, dim3 dimBlocks,
                            void** args, size_t sharedMemBytes __dparm(0),
                            hipStream_t stream __dparm(0));
+hipError_t hipLaunchKernelBundledArgs(const void* hostFunction, dim3 gridDim, dim3 blockDim, void* args, size_t argsSize,
+                           size_t sharedMemBytes, hipStream_t stream);
 
 /**
  * @brief Enqueues a host function call in a stream.

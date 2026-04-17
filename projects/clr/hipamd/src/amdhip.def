@@ -406,6 +406,7 @@ hipStreamGetPriority_spt
 hipStreamWaitEvent_spt
 hipEventRecord_spt
 hipLaunchKernel_spt
+hipLaunchKernelBundledArgs
 hipLaunchCooperativeKernel_spt
 hipStreamWriteValue32
 hipStreamWriteValue64

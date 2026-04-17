@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 26
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 27
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -447,6 +447,9 @@ typedef hipError_t (*t_hipLaunchCooperativeKernelMultiDevice)(hipLaunchParams* l
 typedef hipError_t (*t_hipLaunchHostFunc)(hipStream_t stream, hipHostFn_t fn, void* userData);
 typedef hipError_t (*t_hipLaunchKernel)(const void* function_address, dim3 numBlocks,
                                         dim3 dimBlocks, void** args, size_t sharedMemBytes,
+                                        hipStream_t stream);
+typedef hipError_t (*t_hipLaunchKernelBundledArgs)(const void* function_address, dim3 numBlocks,
+                                        dim3 dimBlocks, void* args, size_t argsSize, size_t sharedMemBytes,
                                         hipStream_t stream);
 typedef hipError_t (*t_hipMalloc)(void** ptr, size_t size);
 typedef hipError_t (*t_hipMalloc3D)(hipPitchedPtr* pitchedDevPtr, hipExtent extent);
@@ -1737,6 +1740,7 @@ struct HipDispatchTable {
 
   // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 27
+  t_hipLaunchKernelBundledArgs hipLaunchKernelBundledArgs_fn;
 
   // ******************************************************************************************* //
   //

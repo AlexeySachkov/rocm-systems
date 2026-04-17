@@ -364,6 +364,8 @@ hipError_t hipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsLi
 hipError_t hipLaunchHostFunc(hipStream_t stream, hipHostFn_t fn, void* userData);
 hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks, dim3 dimBlocks,
                            void** args, size_t sharedMemBytes, hipStream_t stream);
+hipError_t hipLaunchKernelBundledArgs(const void* function_address, dim3 numBlocks, dim3 dimBlocks,
+                           void* args, size_t argsSize, size_t sharedMemBytes, hipStream_t stream);
 hipError_t hipMalloc(void** ptr, size_t size);
 hipError_t hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent extent);
 hipError_t hipMalloc3DArray(hipArray_t* array, const struct hipChannelFormatDesc* desc,
@@ -1138,6 +1140,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
       hip::hipLaunchCooperativeKernelMultiDevice;
   ptrDispatchTable->hipLaunchHostFunc_fn = hip::hipLaunchHostFunc;
   ptrDispatchTable->hipLaunchKernel_fn = hip::hipLaunchKernel;
+  ptrDispatchTable->hipLaunchKernelBundledArgs_fn = hip::hipLaunchKernelBundledArgs;
   ptrDispatchTable->hipMalloc_fn = hip::hipMalloc;
   ptrDispatchTable->hipMalloc3D_fn = hip::hipMalloc3D;
   ptrDispatchTable->hipMalloc3DArray_fn = hip::hipMalloc3DArray;
@@ -2147,9 +2150,10 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipMemPrefetchBatchAsync_fn, 517);
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 518)
+HIP_ENFORCE_ABI(HipDispatchTable, hipLaunchKernelBundledArgs_fn, 518);
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 519)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 26,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 27,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

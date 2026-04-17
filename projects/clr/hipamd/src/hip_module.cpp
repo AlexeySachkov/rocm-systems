@@ -488,9 +488,9 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
   return hipSuccess;
 }
 
-hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gridDimY,
-                                 uint32_t gridDimZ, uint32_t blockDimX, uint32_t blockDimY,
-                                 uint32_t blockDimZ, uint32_t sharedMemBytes, hipStream_t hStream,
+hipError_t hipModuleLaunchKernel(hipFunction_t f, unsigned gridDimX, unsigned gridDimY,
+                                 unsigned gridDimZ, unsigned blockDimX, unsigned blockDimY,
+                                 unsigned blockDimZ, unsigned sharedMemBytes, hipStream_t hStream,
                                  void** kernelParams, void** extra) {
   HIP_INIT_API(hipModuleLaunchKernel, f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY,
                blockDimZ, sharedMemBytes, hStream, kernelParams, extra);
@@ -813,6 +813,16 @@ hipError_t hipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim
   HIP_INIT_API(hipLaunchKernel, hostFunction, gridDim, blockDim, args, sharedMemBytes, stream);
   HIP_RETURN_DURATION(
       hipLaunchKernel_common(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream));
+}
+
+hipError_t hipLaunchKernelBundledArgs(const void* hostFunction, dim3 gridDim, dim3 blockDim, void* args, size_t argsSize,
+                           size_t sharedMemBytes, hipStream_t stream) {
+  HIP_INIT_API(hipLaunchKernelBundledArgs, hostFunction, gridDim, blockDim, args, sharedMemBytes, stream);
+  void* config[]{HIP_LAUNCH_PARAM_BUFFER_POINTER, args, HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                 &argsSize, HIP_LAUNCH_PARAM_END};
+  HIP_RETURN_DURATION(
+    hip::hipModuleLaunchKernel(reinterpret_cast<hipFunction_t>(const_cast<void *>(hostFunction)), gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y, blockDim.z, sharedMemBytes, stream, nullptr, &config[0]);
+  );
 }
 
 hipError_t hipLaunchKernel_spt(const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args,
