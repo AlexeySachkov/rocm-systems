@@ -21,7 +21,7 @@ Testcase Scenarios :
  * Adding manual empty nodes
  * Cyclic graph, cycle formation first, then adding more nodes
  */
-TEST_CASE(Unit_hipGraph_BasicCyclic1) {
+HIP_TEST_CASE(Unit_hipGraph_BasicCyclic1) {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -51,7 +51,7 @@ TEST_CASE(Unit_hipGraph_BasicCyclic1) {
  * Adding manual empty nodes
  * Cyclic graph, cycle formation first, Remove edge to resolve cycle
  */
-TEST_CASE(Unit_hipGraph_BasicCyclic2) {
+HIP_TEST_CASE(Unit_hipGraph_BasicCyclic2) {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -82,7 +82,7 @@ TEST_CASE(Unit_hipGraph_BasicCyclic2) {
  * Cyclic graph, cycle formation first, Remove edge causes disconnected graph which is still
  * cyclic
  */
-TEST_CASE(Unit_hipGraph_BasicCyclic3) {
+HIP_TEST_CASE(Unit_hipGraph_BasicCyclic3) {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -113,7 +113,7 @@ TEST_CASE(Unit_hipGraph_BasicCyclic3) {
  * Adding manual empty nodes
  * Uncyclic graph, removing edge from middle of linear graph
  */
-TEST_CASE(Unit_hipGraph_BasicCyclic4) {
+HIP_TEST_CASE(Unit_hipGraph_BasicCyclic4) {
   int N = 1024 * 1024;
   int Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -172,7 +172,7 @@ TEST_CASE(Unit_hipGraph_BasicCyclic4) {
  * Adding manual empty nodes
  * cyclic graph, removing edge to resolve cycle and remove edge from middle of graph
  */
-TEST_CASE(Unit_hipGraph_BasicCyclic5) {
+HIP_TEST_CASE(Unit_hipGraph_BasicCyclic5) {
   int N = 1024 * 1024;
   int Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -230,4 +230,28 @@ TEST_CASE(Unit_hipGraph_BasicCyclic5) {
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
+}
+
+HIP_TEST_CASE(Unit_hipGraph_CyclicChildInstantiation) {
+  hipGraph_t parent_graph = nullptr;
+  hipGraph_t child_graph = nullptr;
+  hipGraphExec_t graph_exec = nullptr;
+  hipGraphNode_t child_node = nullptr;
+  hipGraphNode_t first_node = nullptr;
+  hipGraphNode_t second_node = nullptr;
+  hipGraphNode_t third_node = nullptr;
+
+  HIP_CHECK(hipGraphCreate(&parent_graph, 0));
+  HIP_CHECK(hipGraphCreate(&child_graph, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&first_node, child_graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&second_node, child_graph, &first_node, 1));
+  HIP_CHECK(hipGraphAddEmptyNode(&third_node, child_graph, &second_node, 1));
+  HIP_CHECK(hipGraphAddDependencies(child_graph, &third_node, &second_node, 1));
+  HIP_CHECK(hipGraphAddChildGraphNode(&child_node, parent_graph, nullptr, 0, child_graph));
+
+  REQUIRE(hipGraphInstantiate(&graph_exec, parent_graph, nullptr, nullptr, 0) ==
+          hipErrorInvalidValue);
+
+  HIP_CHECK(hipGraphDestroy(parent_graph));
+  HIP_CHECK(hipGraphDestroy(child_graph));
 }

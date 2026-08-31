@@ -31,7 +31,7 @@ static void hipGraphRetainUserObject_Functional_1(void* object, void destroyObj(
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
-TEST_CASE(Unit_hipGraphRetainUserObject_Functional_1) {
+HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Functional_1) {
   SECTION("Called with int Object") {
     int* object = new int();
     REQUIRE(object != nullptr);
@@ -56,7 +56,7 @@ TEST_CASE(Unit_hipGraphRetainUserObject_Functional_1) {
 
 /* 2) Create UserObject and GraphUserObject and retain using custom reference
       count and release it by calling hipGraphReleaseUserObject with count. */
-TEST_CASE(Unit_hipGraphRetainUserObject_Functional_2) {
+HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Functional_2) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -135,7 +135,7 @@ TEST_CASE(Unit_hipGraphRetainUserObject_Functional_2) {
  5) Pass flag as 0
  6) Pass flag as INT_MAX
  */
-TEST_CASE(Unit_hipGraphRetainUserObject_Negative) {
+HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Negative) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
@@ -171,7 +171,11 @@ TEST_CASE(Unit_hipGraphRetainUserObject_Negative) {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
-TEST_CASE(Unit_hipGraphRetainUserObject_Negative_Basic) {
+// This test releases the user object with a ref count more than the count
+// it was retained. The API is expected to return success in such cases
+// though the underlying user object is not released. This is most likely
+// done to match CUDA behavior, but this can cause undefined behavior.
+HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Negative_Basic) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
@@ -195,6 +199,11 @@ TEST_CASE(Unit_hipGraphRetainUserObject_Negative_Basic) {
   // Release graph object with reference count 8
   HIP_CHECK(hipGraphReleaseUserObject(graph, hObject, 8));
 
+  // Release user object with reference count 2
   HIP_CHECK(hipUserObjectRelease(hObject, 2));
+
+  // Finally, release user object with reference count 1
+  // This will avoid memory leaks
+  HIP_CHECK(hipUserObjectRelease(hObject, 1));
   HIP_CHECK(hipGraphDestroy(graph));
 }

@@ -53,8 +53,10 @@ void KFDSVMRangeTest::TearDown() {
 
 void KFDSVMRangeTest::BasicSystemMemTest(int gpuNode) {
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     PM4Queue queue;
     HSAuint64 AlternateVAGPU;
@@ -104,8 +106,10 @@ TEST_P(KFDSVMRangeTest, BasicSystemMemTest) {
 
 void KFDSVMRangeTest::SetGetAttributesTest(int gpuNode) {
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
@@ -135,14 +139,14 @@ void KFDSVMRangeTest::SetGetAttributesTest(int gpuNode) {
                                              0,
                                          };
     HSAint32 enable = -1;
-    EXPECT_SUCCESS_GPU(hsaKmtGetXNACKMode(&enable), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtGetXNACKMode, m_hsakmt_current_ctx, &enable), gpuNode);
     expectedDefaultResults[4] = (enable) ?
                                  HSA_SVM_ATTR_ACCESS : HSA_SVM_ATTR_NO_ACCESS;
     char *pBuf = sysBuffer->As<char *>();
 
     LOG() << "Get default atrributes" << std::endl;
     memcpy(outputAttributes, inputAttributes, nAttributes * sizeof(HSA_SVM_ATTRIBUTE));
-    EXPECT_SUCCESS_GPU(hsaKmtSVMGetAttr(pBuf, BufSize,
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx, pBuf, BufSize,
                                     nAttributes, outputAttributes), gpuNode);
 
     for (i = 0; i < nAttributes; i++) {
@@ -161,9 +165,9 @@ void KFDSVMRangeTest::SetGetAttributesTest(int gpuNode) {
     }
     LOG() << "Setting/Getting atrributes" << std::endl;
     memcpy(outputAttributes, inputAttributes, nAttributes * sizeof(HSA_SVM_ATTRIBUTE));
-    EXPECT_SUCCESS_GPU(hsaKmtSVMSetAttr(pBuf, BufSize,
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtSVMSetAttr, m_hsakmt_current_ctx, pBuf, BufSize,
                                     nAttributes, inputAttributes), gpuNode);
-    EXPECT_SUCCESS_GPU(hsaKmtSVMGetAttr(pBuf, BufSize,
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx, pBuf, BufSize,
                                     nAttributes, outputAttributes), gpuNode);
     for (i = 0; i < nAttributes; i++) {
         if (outputAttributes[i].type == HSA_SVM_ATTR_ACCESS ||
@@ -203,10 +207,10 @@ TEST_P(KFDSVMRangeTest, XNACKModeTest) {
     HSAint32 enable = 0;
     const std::vector<int> gpuNodes = m_NodeInfo.GetNodesWithGPU();
 
-    EXPECT_SUCCESS(hsaKmtGetXNACKMode(&enable));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetXNACKMode, g_baseTest->m_hsakmt_current_ctx, &enable));
     for (i = 0; i < 2; i++) {
         enable = !enable;
-        r = hsaKmtSetXNACKMode(enable);
+        r = HSAKMT_CALL(hsaKmtSetXNACKMode, g_baseTest->m_hsakmt_current_ctx, enable);
         if (r == HSAKMT_STATUS_SUCCESS) {
             LOG() << "XNACK mode: " << std::boolalpha << enable <<
                      " supported" << std::endl;
@@ -216,7 +220,7 @@ TEST_P(KFDSVMRangeTest, XNACKModeTest) {
                       << gpuNodes.at(j) << std::endl;
                 ASSERT_SUCCESS(queue.Create(gpuNodes.at(j)));
                 EXPECT_EQ(HSAKMT_STATUS_ERROR,
-                        hsaKmtSetXNACKMode(enable));
+                        HSAKMT_CALL(hsaKmtSetXNACKMode, g_baseTest->m_hsakmt_current_ctx, enable));
                 EXPECT_SUCCESS(queue.Destroy());
             }
         } else if (r == HSAKMT_STATUS_NOT_SUPPORTED) {
@@ -233,8 +237,10 @@ void KFDSVMRangeTest::InvalidRangeTest(int gpuNode) {
     HSAuint32 Flags;;
     HSAKMT_STATUS ret;
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     Flags = HSA_SVM_FLAG_HOST_ACCESS | HSA_SVM_FLAG_COHERENT;
 
@@ -337,8 +343,10 @@ void KFDSVMRangeTest::SplitSystemRangeTest(int gpuNode) {
         return;
     }
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     SplitRangeTest(gpuNode, 0);
 
@@ -362,8 +370,10 @@ void KFDSVMRangeTest::EvictSystemRangeTest(int gpuNode) {
         return;
     }
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     Assembler* m_pAsm;
     m_pAsm = GetAssemblerFromNodeId(gpuNode);
@@ -468,8 +478,10 @@ TEST_P(KFDSVMRangeTest, EvictSystemRangeTest) {
 
 void KFDSVMRangeTest::PartialUnmapSysMemTest(int gpuNode) {
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     Assembler* m_pAsm;
     m_pAsm = GetAssemblerFromNodeId(gpuNode);
@@ -533,8 +545,10 @@ TEST_P(KFDSVMRangeTest, PartialUnmapSysMemTest) {
 
 void KFDSVMRangeTest::BasicVramTest(int gpuNode) {
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     Assembler* m_pAsm;
     m_pAsm = GetAssemblerFromNodeId(gpuNode);
@@ -591,8 +605,10 @@ TEST_P(KFDSVMRangeTest, BasicVramTest) {
 
 void KFDSVMRangeTest::SplitVramRangeTest(int gpuNode) {
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
@@ -616,8 +632,10 @@ TEST_P(KFDSVMRangeTest, SplitVramRangeTest) {
 
 void KFDSVMRangeTest::PrefetchTest(int gpuNode) {
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     unsigned int BufSize = 16 << 10;
     HsaSVMRange *sysBuffer;
@@ -634,7 +652,7 @@ void KFDSVMRangeTest::PrefetchTest(int gpuNode) {
     /* hsaKmtSVMGetAttr for HSA_SVM_ATTR_ACCESS is either fail or
      * returned attr.value not equal gpuNode
      */
-    if (hsaKmtSVMGetAttr(pBuf, BufSize, 1, &attr) == HSAKMT_STATUS_SUCCESS)
+    if (HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx, pBuf, BufSize, 1, &attr) == HSAKMT_STATUS_SUCCESS)
         EXPECT_NE_GPU(attr.value, gpuNode, gpuNode);
 
     sysBuffer = new HsaSVMRange(BufSize, gpuNode);
@@ -667,8 +685,10 @@ TEST_P(KFDSVMRangeTest, PrefetchTest) {
 
 void KFDSVMRangeTest::MigrateTest(int gpuNode) {
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
@@ -750,8 +770,10 @@ TEST_P(KFDSVMRangeTest, MigrateTest) {
 
 void KFDSVMRangeTest::MigrateAccessInPlaceTest(int gpuNode) {
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
@@ -832,8 +854,10 @@ TEST_P(KFDSVMRangeTest, MigrateAccessInPlaceTest) {
 
 void KFDSVMRangeTest::MigrateGranularityTest(int gpuNode) {
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
@@ -893,8 +917,10 @@ TEST_P(KFDSVMRangeTest, MigrateGranularityTest) {
 
 void KFDSVMRangeTest::MigrateLargeBufTest(int gpuNode) {
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     PM4Queue queue;
     HSAuint64 AlternateVAGPU;
@@ -994,8 +1020,10 @@ TEST_P(KFDSVMRangeTest, MigrateLargeBufTest) {
 
 void KFDSVMRangeTest::MigratePolicyTest(int gpuNode) {
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
@@ -1290,8 +1318,10 @@ unsigned int GpuReadThread(void* p) {
 
 void KFDSVMRangeTest::MultiThreadMigrationTest(int gpuNode) {
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
@@ -1357,8 +1387,10 @@ TEST_P(KFDSVMRangeTest, MultiThreadMigrationTest) {
  */
 void KFDSVMRangeTest::MigrateFileBackedRangeTest(int gpuNode) {
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
@@ -1480,7 +1512,7 @@ TEST_P(KFDSVMRangeTest, ReadOnlyRangeTest) {
     eventDesc.SyncVar.SyncVar.UserData = NULL;
     eventDesc.SyncVar.SyncVarSize = 0;
 
-    ret = hsaKmtCreateEvent(&eventDesc, true, false, &vmFaultEvent);
+    ret = HSAKMT_CALL(hsaKmtCreateEvent, g_baseTest->m_hsakmt_current_ctx, &eventDesc, true, false, &vmFaultEvent);
     if (ret != HSAKMT_STATUS_SUCCESS) {
         WARN() << "Event create failed" << std::endl;
         exit(ret);
@@ -1510,7 +1542,7 @@ TEST_P(KFDSVMRangeTest, ReadOnlyRangeTest) {
     sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
                     pinBuf, reinterpret_cast<void *>(pBuf), PAGE_SIZE));
 
-    ret = hsaKmtWaitOnEvent(vmFaultEvent, g_TestTimeOut);
+    ret = HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, vmFaultEvent, g_TestTimeOut);
     if (ret != HSAKMT_STATUS_SUCCESS) {
         WARN() << "Wait failed. No Exception triggered" << std::endl;
         goto event_fail;
@@ -1530,7 +1562,7 @@ TEST_P(KFDSVMRangeTest, ReadOnlyRangeTest) {
 event_fail:
     EXPECT_SUCCESS(sdmaQueue.Destroy());
 queue_fail:
-    hsaKmtDestroyEvent(vmFaultEvent);
+    HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, vmFaultEvent);
     /* Child process exit, otherwise it will continue to run remaining tests */
     exit(ret);
 
@@ -1555,7 +1587,7 @@ unsigned int ReadSMIEventThread(void* p) {
     HSAuint64 events;
     int fd;
 
-    EXPECT_SUCCESS_GPU(hsaKmtOpenSMI(pArgs->nodeid, &fd), pArgs->nodeid);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtOpenSMI, g_baseTest->m_hsakmt_current_ctx, pArgs->nodeid, &fd), pArgs->nodeid);
 
     events = HSA_SMI_EVENT_MASK_FROM_INDEX(HSA_SMI_EVENT_INDEX_MAX) - 1;
     EXPECT_EQ_GPU(write(fd, &events, sizeof(events)), sizeof(events), pArgs->nodeid);
@@ -1616,8 +1648,10 @@ unsigned int ReadSMIEventThread(void* p) {
 
 void KFDSVMRangeTest::HMMProfilingEvent(int gpuNode) {
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     if (Get_Version()->KernelInterfaceMinorVersion < 10)
         return;
@@ -1789,8 +1823,10 @@ TEST_P(KFDSVMRangeTest, VramOvercommitGiantRangeTest) {
  */
 void KFDSVMRangeTest::PrefaultPartialRangeTest(int gpuNode) {
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
         return;
+    }
 
     unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
@@ -1836,6 +1872,620 @@ TEST_P(KFDSVMRangeTest, PrefaultPartialRangeTest) {
     ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->PrefaultPartialRangeTest(gpuNode);
     }));
+
+    TEST_END
+}
+
+/*
+ * Test 57bit VA mapping on GPU with 5-level page table
+ */
+TEST_P(KFDSVMRangeTest, VAHighAddr) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    if (!SVMAPISupported())
+        return;
+
+    int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+
+    if (m_FamilyId < FAMILY_GFX125X) {
+        LOG() << std::hex << "Skipping test: 57bit VA does not support on family ID 0x" << m_FamilyId << "." << std::endl;
+        return;
+    }
+
+    HsaSVMRange DataBuffer(PAGE_SIZE, defaultGPUNode);
+    HSAuint64 *pData = DataBuffer.As<HSAuint64 *>();
+    memset(pData, 0x65, PAGE_SIZE);
+
+    /*
+     * Test cases copy from kernel/tools/testing/selftests/mm/va_high_addr_switch.c
+     */
+    void *ptr = mmap((void *)(1UL << 50), PAGE_SIZE, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+    if (ptr == MAP_FAILED) {
+        LOG() << "Skipping test: system does not support 57bit VA" << std::endl;
+        return;
+    }
+    munmap(ptr, PAGE_SIZE);
+
+    constexpr unsigned long ADDR_MARK_128TB = (1UL << 47);
+    constexpr unsigned long HIGH_ADDR_128TB = (1UL << 48);
+
+    unsigned long pagesize = PAGE_SIZE;
+    unsigned long low_addr = (1UL << 30);
+    unsigned long addr_switch_hint = ADDR_MARK_128TB;
+    unsigned long high_addr = HIGH_ADDR_128TB;
+
+    struct testcase {
+            void *addr;
+            unsigned long size;
+            unsigned long flags;
+            const char *msg;
+            unsigned int low_addr_required:1;
+            unsigned int keep_mapped:1;
+            void *pBuf;
+    } testcases[] = {
+        {
+            /*
+             * If stack is moved, we could possibly allocate
+             * this at the requested address.
+             */
+            .addr = ((void *)(addr_switch_hint - pagesize)),
+            .size = pagesize,
+            .flags = MAP_PRIVATE | MAP_ANONYMOUS,
+            .msg = "mmap(addr_switch_hint - pagesize, pagesize)",
+            .low_addr_required = 1,
+        },
+        {
+            /*
+             * Unless MAP_FIXED is specified, allocation based on hint
+             * addr is never at requested address or above it, which is
+             * beyond high address switch boundary in this case. Instead,
+             * a suitable allocation is found in lower address space.
+             */
+            .addr = ((void *)(addr_switch_hint - pagesize)),
+            .size = 2 * pagesize,
+            .flags = MAP_PRIVATE | MAP_ANONYMOUS,
+            .msg = "mmap(addr_switch_hint - pagesize, (2 * pagesize))",
+            .low_addr_required = 1,
+        },
+        {
+            /*
+             * Exact mapping at high address switch boundary, should
+             * be obtained even without MAP_FIXED as area is free.
+             */
+            .addr = ((void *)(addr_switch_hint)),
+            .size = pagesize,
+            .flags = MAP_PRIVATE | MAP_ANONYMOUS,
+            .msg = "mmap(addr_switch_hint, pagesize)",
+            .low_addr_required = 0,
+            .keep_mapped = 1,
+        },
+        {
+            .addr = (void *)(addr_switch_hint),
+            .size = 2 * pagesize,
+            .flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
+            .msg = "mmap(addr_switch_hint, 2 * pagesize, MAP_FIXED)",
+        },
+        {
+            .addr = NULL,
+            .size = 2 * pagesize,
+            .flags = MAP_PRIVATE | MAP_ANONYMOUS,
+            .msg = "mmap(NULL)",
+            .low_addr_required = 1,
+        },
+        {
+            .addr = (void *)low_addr,
+            .size = 2 * pagesize,
+            .flags = MAP_PRIVATE | MAP_ANONYMOUS,
+            .msg = "mmap(low_addr)",
+            .low_addr_required = 1,
+        },
+        {
+            .addr = (void *)high_addr,
+            .size = 2 * pagesize,
+            .flags = MAP_PRIVATE | MAP_ANONYMOUS,
+            .msg = "mmap(high_addr)",
+            .low_addr_required = 0,
+            .keep_mapped = 1,
+        },
+        {
+            .addr = (void *)high_addr,
+            .size = 2 * pagesize,
+            .flags = MAP_PRIVATE | MAP_ANONYMOUS,
+            .msg = "mmap(high_addr) again",
+            .low_addr_required = 0,
+            .keep_mapped = 1,
+        },
+        {
+            .addr = (void *)high_addr,
+            .size = 2 * pagesize,
+            .flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
+            .msg = "mmap(high_addr, MAP_FIXED)",
+        },
+        {
+            .addr = (void *) -1,
+            .size = 2 * pagesize,
+            .flags = MAP_PRIVATE | MAP_ANONYMOUS,
+            .msg = "mmap(-1)",
+            .low_addr_required = 0,
+            .keep_mapped = 1,
+        },
+        {
+            .addr = (void *) -1,
+            .size = 2 * pagesize,
+            .flags = MAP_PRIVATE | MAP_ANONYMOUS,
+            .msg = "mmap(-1) again",
+        },
+        {
+            .addr = ((void *)(addr_switch_hint - pagesize)),
+            .size = pagesize,
+            .flags = MAP_PRIVATE | MAP_ANONYMOUS,
+            .msg = "mmap(addr_switch_hint - pagesize, pagesize)",
+            .low_addr_required = 1,
+        },
+        {
+            .addr = (void *)(addr_switch_hint - pagesize),
+            .size = 2 * pagesize,
+            .flags = MAP_PRIVATE | MAP_ANONYMOUS,
+            .msg = "mmap(addr_switch_hint - pagesize, 2 * pagesize)",
+            .low_addr_required = 1,
+            .keep_mapped = 1,
+        },
+        {
+            .addr = (void *)(addr_switch_hint - pagesize / 2),
+            .size = 2 * pagesize,
+            .flags = MAP_PRIVATE | MAP_ANONYMOUS,
+            .msg = "mmap(addr_switch_hint - pagesize/2 , 2 * pagesize)",
+            .low_addr_required = 1,
+            .keep_mapped = 1,
+        },
+        {
+            .addr = ((void *)(addr_switch_hint)),
+            .size = pagesize,
+            .flags = MAP_PRIVATE | MAP_ANONYMOUS,
+            .msg = "mmap(addr_switch_hint, pagesize)",
+         },
+         {
+             .addr = (void *)(addr_switch_hint),
+             .size = 2 * pagesize,
+             .flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
+             .msg = "mmap(addr_switch_hint, 2 * pagesize, MAP_FIXED)",
+         }
+    };
+
+    int ret_fail = 0;
+
+    for (int i = 0; i < sizeof(testcases) / sizeof(struct testcase); i++) {
+        struct testcase *t = testcases + i;
+
+        t->pBuf = mmap(t->addr, t->size, PROT_READ | PROT_WRITE, t->flags, -1, 0);
+        if (t->pBuf == MAP_FAILED) {
+            LOG() << std::hex << t->msg << ": " << t->pBuf << " - " << "FAILED" << std::endl;
+            ret_fail++;
+            continue;
+        }
+
+        if (t->low_addr_required && t->pBuf >= (void *)(addr_switch_hint)) {
+            LOG() << std::hex << t->msg << ": " << t->pBuf << " - " << "low_addr FAILED" << std::endl;
+            ret_fail++;
+        } else if (!t->low_addr_required && t->pBuf < (void *)(addr_switch_hint)) {
+            LOG() << std::hex << t->msg << ": " << t->pBuf << " - " << "high_addr FAILED" << std::endl;
+            ret_fail++;
+        } else {
+            LOG() << std::hex << t->msg << ": " << t->pBuf << " - " << "OK" << std::endl;
+            memset(t->pBuf, 0, t->size);
+
+            EXPECT_SUCCESS(RegisterSVMRange(defaultGPUNode, t->pBuf, t->size, 0, 0));
+
+            HsaMemoryBuffer isaBuffer(PAGE_SIZE, defaultGPUNode, true, false, true);
+            PM4Queue queue;
+
+            ASSERT_SUCCESS(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()));
+            ASSERT_SUCCESS(queue.Create(defaultGPUNode));
+            Dispatch dispatch(isaBuffer);
+            dispatch.SetArgs(pData, t->pBuf);
+            dispatch.Submit(queue);
+            dispatch.Sync();
+
+            ASSERT_EQ(0x65, ((char *)t->pBuf)[0]);
+            ASSERT_SUCCESS(queue.Destroy());
+        }
+
+        if (!t->keep_mapped) {
+            munmap(t->pBuf, t->size);
+            t->pBuf = NULL;
+        }
+    }
+
+    for (int i = 0; i < sizeof(testcases) / sizeof(struct testcase); i++) {
+        struct testcase *t = testcases + i;
+
+        if (t->pBuf && t->pBuf != MAP_FAILED)
+            munmap(t->pBuf, t->size);
+    }
+
+    ASSERT_SUCCESS(ret_fail);
+    TEST_END
+}
+
+/*
+ * To test entire 56bit VA range, not conflict with Scratch and LDS space
+ * Test 4GB above 48bit, and 4GB below 56bit mapping with 1GB step on GPU using 5-level page table
+ */
+TEST_P(KFDSVMRangeTest, MapAllHighAddr) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    if (!SVMAPISupported())
+        return;
+
+    int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+
+    if (m_FamilyId < FAMILY_GFX125X) {
+        LOG() << std::hex << "Skipping test: 57bit VA does not support on family ID 0x" << m_FamilyId << "." << std::endl;
+        return;
+    }
+
+    void *ptr = mmap((void *)(1UL << 50), PAGE_SIZE, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+    if (ptr == MAP_FAILED) {
+        LOG() << "Skipping test: system does not support 57bit VA" << std::endl;
+        return;
+    }
+    munmap(ptr, PAGE_SIZE);
+
+    HsaSVMRange DataBuffer(PAGE_SIZE, defaultGPUNode);
+    HSAuint64 *pData = DataBuffer.As<HSAuint64 *>();
+    memset(pData, 0x65, PAGE_SIZE);
+
+    #define HIGH_ADDR_256TB (1UL << 48)
+    #define HIGH_ADDR_END   (1UL << 56)
+    #define SIZE_TO_TEST    (4UL << 30)
+
+    unsigned long map_size = PAGE_SIZE * 2;
+    unsigned long step_size = (1UL << 30);
+    unsigned long addr;
+
+    for (addr = HIGH_ADDR_256TB; addr < HIGH_ADDR_256TB + SIZE_TO_TEST; addr += step_size) {
+        void *pBuf = mmap((void *)addr, map_size, PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+
+        if (pBuf == MAP_FAILED) {
+            LOG() << std::hex << "mmap at 0x" << addr << " FAILED" << std::endl;
+            continue;
+        }
+
+        LOG() << std::hex << "Mmap at 0x" << addr << " OK" << std::endl;
+        memset(pBuf, 0, map_size);
+
+        EXPECT_SUCCESS(RegisterSVMRange(defaultGPUNode, pBuf, map_size, 0, 0));
+
+        HsaMemoryBuffer isaBuffer(PAGE_SIZE, defaultGPUNode, true, false, true);
+        PM4Queue queue;
+
+        ASSERT_SUCCESS(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()));
+        ASSERT_SUCCESS(queue.Create(defaultGPUNode));
+        Dispatch dispatch(isaBuffer);
+        dispatch.SetArgs(pData, pBuf);
+        dispatch.Submit(queue);
+        dispatch.Sync();
+
+        ASSERT_EQ(0x65, ((char *)pBuf)[0]);
+
+        ASSERT_SUCCESS(queue.Destroy());
+        munmap(pBuf, map_size);
+    }
+
+    for (addr = HIGH_ADDR_END - SIZE_TO_TEST; addr < HIGH_ADDR_END; addr += step_size) {
+        void *pBuf = mmap((void *)addr, map_size, PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+
+        if (pBuf == MAP_FAILED) {
+            LOG() << std::hex << "mmap at 0x" << addr << " FAILED" << std::endl;
+            continue;
+        }
+
+        LOG() << std::hex << "Mmap at 0x" << addr << " OK" << std::endl;
+        memset(pBuf, 0, map_size);
+
+        EXPECT_SUCCESS(RegisterSVMRange(defaultGPUNode, pBuf, map_size, 0, 0));
+
+        HsaMemoryBuffer isaBuffer(PAGE_SIZE, defaultGPUNode, true, false, true);
+        PM4Queue queue;
+
+        ASSERT_SUCCESS(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()));
+        ASSERT_SUCCESS(queue.Create(defaultGPUNode));
+        Dispatch dispatch(isaBuffer);
+        dispatch.SetArgs(pData, pBuf);
+        dispatch.Submit(queue);
+        dispatch.Sync();
+
+        ASSERT_EQ(0x65, ((char *)pBuf)[0]);
+
+        ASSERT_SUCCESS(queue.Destroy());
+        munmap(pBuf, map_size);
+    }
+
+    TEST_END
+}
+
+/*
+ * Test integer overflow protection in SVM attribute functions
+ * ROCM-26862: Verify overflow checks prevent stack buffer overflow
+ */
+TEST_P(KFDSVMRangeTest, IntegerOverflowProtection) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    if (!SVMAPISupported())
+        return;
+
+    int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+
+    if (!SVMAPISupported_GPU(defaultGPUNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << defaultGPUNode << std::endl;
+        return;
+    }
+
+    unsigned int BufferSize = PAGE_SIZE;
+    HsaSVMRange testBuffer(BufferSize, defaultGPUNode);
+    void *pBuf = testBuffer.As<void *>();
+
+    LOG() << "Testing integer overflow protection in SVM functions" << std::endl;
+
+    /* Test 1: Verify extremely large nattr triggers size limit check in hsaKmtSVMSetAttr
+     * The ioctl size field is limited to 14 bits (16383 bytes), which is reached before
+     * SIZE_MAX overflow. With sizeof(HSA_SVM_ATTRIBUTE)=8 and args header=24 bytes,
+     * the limit is ~2044 attributes. Test with a value that exceeds this.
+     */
+    {
+        // This value exceeds the ioctl size limit (14 bits = 16383 bytes max)
+        HSAuint32 nattr_too_large = 10000;
+        HSA_SVM_ATTRIBUTE *attrs = new HSA_SVM_ATTRIBUTE[2];  // Only allocate small array for test
+
+        attrs[0].type = HSA_SVM_ATTR_PREFETCH_LOC;
+        attrs[0].value = defaultGPUNode;
+        attrs[1].type = HSA_SVM_ATTR_PREFERRED_LOC;
+        attrs[1].value = defaultGPUNode;
+
+        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMSetAttr, m_hsakmt_current_ctx,
+                                           pBuf, BufferSize, nattr_too_large, attrs);
+
+        // Should fail with INVALID_PARAMETER due to size limit check
+        EXPECT_NE(status, HSAKMT_STATUS_SUCCESS)
+            << "hsaKmtSVMSetAttr should reject nattr that exceeds ioctl size limit";
+        EXPECT_EQ(status, HSAKMT_STATUS_INVALID_PARAMETER)
+            << "Expected INVALID_PARAMETER for size limit, got " << status;
+
+        delete[] attrs;
+        LOG() << "Test 1 (SetAttr size limit): PASSED - excessive nattr correctly rejected" << std::endl;
+    }
+
+    /* Test 2: Verify extremely large nattr triggers size limit check in hsaKmtSVMGetAttr */
+    {
+        HSAuint32 nattr_too_large = 10000;
+        HSA_SVM_ATTRIBUTE *attrs = new HSA_SVM_ATTRIBUTE[2];
+
+        attrs[0].type = HSA_SVM_ATTR_PREFETCH_LOC;
+        attrs[0].value = 0;
+        attrs[1].type = HSA_SVM_ATTR_PREFERRED_LOC;
+        attrs[1].value = 0;
+
+        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx,
+                                           pBuf, BufferSize, nattr_too_large, attrs);
+
+        // Should fail with INVALID_PARAMETER due to size limit check
+        EXPECT_NE(status, HSAKMT_STATUS_SUCCESS)
+            << "hsaKmtSVMGetAttr should reject nattr that exceeds ioctl size limit";
+        EXPECT_EQ(status, HSAKMT_STATUS_INVALID_PARAMETER)
+            << "Expected INVALID_PARAMETER for size limit, got " << status;
+
+        delete[] attrs;
+        LOG() << "Test 2 (GetAttr size limit): PASSED - excessive nattr correctly rejected" << std::endl;
+    }
+
+    /* Test 3: Verify edge case - maximum safe nattr works correctly */
+    {
+        // Use a reasonably large but safe nattr value
+        HSAuint32 nattr_safe = 10;
+        HSA_SVM_ATTRIBUTE *attrs = new HSA_SVM_ATTRIBUTE[nattr_safe];
+
+        for (HSAuint32 i = 0; i < nattr_safe; i++) {
+            attrs[i].type = HSA_SVM_ATTR_PREFETCH_LOC;
+            attrs[i].value = defaultGPUNode;
+        }
+
+        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMSetAttr, m_hsakmt_current_ctx,
+                                           pBuf, BufferSize, nattr_safe, attrs);
+
+        // Should succeed - this is a valid call
+        EXPECT_SUCCESS(status) << "hsaKmtSVMSetAttr should work with safe nattr";
+
+        delete[] attrs;
+        LOG() << "Test 3 (Safe nattr): PASSED - normal operation verified" << std::endl;
+    }
+
+    /* Test 4: Verify single attribute still works (regression test) */
+    {
+        HSA_SVM_ATTRIBUTE attr;
+        attr.type = HSA_SVM_ATTR_PREFETCH_LOC;
+        attr.value = defaultGPUNode;
+
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtSVMSetAttr, m_hsakmt_current_ctx,
+                                   pBuf, BufferSize, 1, &attr))
+            << "Single attribute SetAttr should still work";
+
+        attr.value = 0;
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx,
+                                   pBuf, BufferSize, 1, &attr))
+            << "Single attribute GetAttr should still work";
+
+        LOG() << "Test 4 (Single attr): PASSED - backward compatibility verified" << std::endl;
+    }
+
+    LOG() << "All integer overflow protection tests PASSED" << std::endl;
+    TEST_END
+}
+
+/*
+ * A caller that registers with HsaMemFlags.ui32.AlwaysMapped is pinning the
+ * range (hsa_amd_memory_lock), and needs the GPU mapping to stay valid until
+ * the matching deregistration.  Under the SVM API that requires
+ * KFD_IOCTL_SVM_FLAG_GPU_ALWAYS_MAPPED; without it svm_range_evict() takes its
+ * xnack_enabled branch and unmaps the range from the GPU on any MMU
+ * invalidation, even while a transfer is still reading it.
+ *
+ * The SVM registration path creates no vm_object, so libhsakmt refcounts the
+ * flagged ranges itself in order to clear the flag again on deregistration.
+ * Overlapping pins share one record, because releasing one of them must not
+ * clear the flag on pages that another live pin still covers -- section 4
+ * below is the regression test for that.
+ */
+TEST_P(KFDSVMRangeTest, RegisterMemoryAlwaysMapped) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    if (!SVMAPISupported())
+        return;
+
+    int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+
+    if (!SVMAPISupported_GPU(defaultGPUNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << defaultGPUNode << std::endl;
+        return;
+    }
+
+    /* GPU_ALWAYS_MAPPED arrived in KFD interface minor version 11 */
+    if (Get_Version()->KernelInterfaceMinorVersion < 11) {
+        LOG() << "Skipping test: GPU_ALWAYS_MAPPED needs KFD interface 1.11" << std::endl;
+        return;
+    }
+
+    if (Get_NodeInfo()->GetNodeProperties(defaultGPUNode)->Integrated) {
+        LOG() << "Skipping test on APU: system memory registration is a no-op" << std::endl;
+        return;
+    }
+
+    const HSAuint64 nPages = 8;
+    const HSAuint64 BufferSize = nPages * PAGE_SIZE;
+
+    /* Plain anonymous host memory: the registration has to be what creates
+     * the SVM range, so HsaSVMRange is deliberately not used here.
+     */
+    void *pBuf = mmap(NULL, BufferSize, PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    void *pCtrl = mmap(NULL, BufferSize, PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    ASSERT_NE(MAP_FAILED, pBuf) << "failed to mmap test buffer";
+    ASSERT_NE(MAP_FAILED, pCtrl) << "failed to mmap control buffer";
+
+    /* GetAttr reports SET_FLAGS as the AND over every range in the interval
+     * and CLR_FLAGS as the complement of the OR, so "set on all pages" and
+     * "set on no page" are both directly observable, and a range that is only
+     * partly flagged answers false to both.
+     */
+    auto MappedOnAllPages = [&](void *addr, HSAuint64 size) -> bool {
+        HSA_SVM_ATTRIBUTE attr;
+
+        attr.type = HSA_SVM_ATTR_SET_FLAGS;
+        attr.value = 0;
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx,
+                                   addr, size, 1, &attr));
+        return !!(attr.value & HSA_SVM_FLAG_GPU_ALWAYS_MAPPED);
+    };
+    auto MappedOnNoPage = [&](void *addr, HSAuint64 size) -> bool {
+        HSA_SVM_ATTRIBUTE attr;
+
+        attr.type = HSA_SVM_ATTR_CLR_FLAGS;
+        attr.value = 0;
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx,
+                                   addr, size, 1, &attr));
+        return !!(attr.value & HSA_SVM_FLAG_GPU_ALWAYS_MAPPED);
+    };
+
+    HsaMemFlags pinFlags;
+    HsaMemFlags plainFlags;
+
+    pinFlags.Value = 0;
+    pinFlags.ui32.HostAccess = 1;
+    pinFlags.ui32.AlwaysMapped = 1;
+
+    plainFlags.Value = 0;
+    plainFlags.ui32.HostAccess = 1;
+
+    /* 1. A registration that is not a pin must be left alone */
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pCtrl, BufferSize, plainFlags));
+    EXPECT_TRUE(MappedOnNoPage(pCtrl, BufferSize))
+        << "GPU_ALWAYS_MAPPED set on a registration that is not a pin";
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pCtrl));
+
+    /* 2. A pin sets the flag on the whole range, unpinning clears it */
+    EXPECT_TRUE(MappedOnNoPage(pBuf, BufferSize))
+        << "GPU_ALWAYS_MAPPED already set before registration";
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pBuf, BufferSize, pinFlags));
+    EXPECT_TRUE(MappedOnAllPages(pBuf, BufferSize))
+        << "GPU_ALWAYS_MAPPED not set by a pinning registration";
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pBuf));
+    EXPECT_TRUE(MappedOnNoPage(pBuf, BufferSize))
+        << "GPU_ALWAYS_MAPPED still set after deregistration";
+
+    /* 3. The same range pinned twice takes two deregistrations to release */
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pBuf, BufferSize, pinFlags));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pBuf, BufferSize, pinFlags));
+    EXPECT_TRUE(MappedOnAllPages(pBuf, BufferSize));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pBuf));
+    EXPECT_TRUE(MappedOnAllPages(pBuf, BufferSize))
+        << "GPU_ALWAYS_MAPPED dropped while a second pin of the same range is live";
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pBuf));
+    EXPECT_TRUE(MappedOnNoPage(pBuf, BufferSize))
+        << "GPU_ALWAYS_MAPPED still set after the last deregistration";
+
+    /* 4. Overlapping pins at different start addresses.  Releasing the inner
+     * one must not unpin the pages the outer one still covers.
+     */
+    void *pInner = reinterpret_cast<char *>(pBuf) + 4 * PAGE_SIZE;
+    const HSAuint64 InnerSize = 4 * PAGE_SIZE;
+
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pBuf, BufferSize, pinFlags));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pInner, InnerSize, pinFlags));
+    EXPECT_TRUE(MappedOnAllPages(pBuf, BufferSize));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pInner));
+    EXPECT_TRUE(MappedOnAllPages(pInner, InnerSize))
+        << "inner deregistration cleared GPU_ALWAYS_MAPPED under a live outer pin";
+    EXPECT_TRUE(MappedOnAllPages(pBuf, BufferSize))
+        << "inner deregistration partly unpinned the outer range";
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pBuf));
+    EXPECT_TRUE(MappedOnNoPage(pBuf, BufferSize))
+        << "GPU_ALWAYS_MAPPED still set after the last deregistration";
+
+    /* 5. A plain registration inside a pinned range is not a pin.  Its
+     * deregistration goes through the same path but must not release the pin,
+     * which it cannot be distinguished from by anything except its address.
+     */
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pBuf, BufferSize, pinFlags));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pInner, InnerSize, plainFlags));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pInner));
+    EXPECT_TRUE(MappedOnAllPages(pBuf, BufferSize))
+        << "a plain deregistration released the pin covering it";
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pBuf));
+    EXPECT_TRUE(MappedOnNoPage(pBuf, BufferSize))
+        << "GPU_ALWAYS_MAPPED still set after the pin was released";
+
+    munmap(pBuf, BufferSize);
+    munmap(pCtrl, BufferSize);
 
     TEST_END
 }

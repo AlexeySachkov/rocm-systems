@@ -28,14 +28,14 @@ static void Copy_to_device() {
   for (unsigned int i = 0; i < ele_size; ++i) {
     A_h[i] = 123;
   }
-  HIP_CHECK(
+  HIP_CHECK_THREAD(
       hipMemcpyAsync(A_d, A_h, ele_size * sizeof(int), hipMemcpyHostToDevice, hipStreamPerThread));
   // Clean up
-  HIP_CHECK(hipHostFree(A_h));
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK_THREAD(hipHostFree(A_h));
+  HIP_CHECK_THREAD(hipFree(A_d));
 }
 
-TEST_CASE(Unit_hipStreamPerThread_DeviceReset_1) {
+HIP_TEST_CASE(Unit_hipStreamPerThread_DeviceReset_1) {
   constexpr unsigned int MAX_THREAD_CNT = 10;
   std::vector<std::thread> threads(MAX_THREAD_CNT);
 
@@ -46,6 +46,7 @@ TEST_CASE(Unit_hipStreamPerThread_DeviceReset_1) {
     th.join();
   }
 
+  HIP_CHECK_THREAD_FINALIZE();
   HIP_CHECK(hipDeviceReset());
 }
 
@@ -57,7 +58,7 @@ TEST_CASE(Unit_hipStreamPerThread_DeviceReset_1) {
  Watch out: Since hipStreamPerThread is an implicit stream hence even after device reset
             it should available to use.
  */
-TEST_CASE(Unit_hipStreamPerThread_DeviceReset_2) {
+HIP_TEST_CASE(Unit_hipStreamPerThread_DeviceReset_2) {
   unsigned int ele_size = (32 * 1024);  // 32KB
   int* A_h = nullptr;
   int* A_d = nullptr;

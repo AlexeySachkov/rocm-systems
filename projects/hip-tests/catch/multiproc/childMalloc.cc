@@ -52,6 +52,9 @@ bool testMallocFromChild() {
     // send the value on the write-descriptor:
     write(fd[1], &testResult, sizeof(testResult));
 
+    if (A_d != nullptr) {
+      HIP_CHECK(hipFree(A_d));
+    }
     // close the write descriptor:
     close(fd[1]);
     exit(0);
@@ -60,7 +63,7 @@ bool testMallocFromChild() {
 }
 
 
-TEST_CASE(ChildMalloc) {
+HIP_TEST_CASE(ChildMalloc) {
   auto res = testMallocFromChild();
   REQUIRE(res == true);
 }

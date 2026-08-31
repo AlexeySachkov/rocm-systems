@@ -161,11 +161,8 @@ static void runMemcpyTests(hipStream_t stream, bool async, allocType type, memTy
 
 #if HT_AMD /* Disabled because frequency based wait is timing out on nvidia platforms */
 
-TEST_CASE(Unit_hipMemcpySync) {
-#if HT_AMD  // To be removed when EXSWCPHIPT-127 is fixed
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-127 - Sync behaviour differs on AMD and Nvidia");
-  return;
-#endif
+HIP_TEST_CASE(Unit_hipMemcpySync) {
+  HIP_SKIP_TEST("Sync behaviour differs on AMD and NVIDIA. See AIRUNTIME-2545.");
   allocType type = GENERATE(allocType::deviceMalloc, allocType::hostMalloc, allocType::hostRegisted,
                             allocType::devRegistered);
   memType memcpy_type = memType::hipMem;
@@ -175,11 +172,8 @@ TEST_CASE(Unit_hipMemcpySync) {
   doMemTest<char>(runMemcpyTests, type, memcpy_type, data);  // Uses long running kernel
 }
 
-TEST_CASE(Unit_hipMemcpy2DSync) {
-#if HT_AMD
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-127 - Sync behaviour differs on AMD and Nvidia");
-  return;
-#endif
+HIP_TEST_CASE(Unit_hipMemcpy2DSync) {
+  HIP_SKIP_TEST("Sync behaviour differs on AMD and NVIDIA. See AIRUNTIME-2545.");
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
 
@@ -191,11 +185,8 @@ TEST_CASE(Unit_hipMemcpy2DSync) {
   doMemTest<char>(runMemcpyTests, mallocType, memcpy_type, data);
 }
 
-TEST_CASE(Unit_hipMemcpy3DSync) {
-#if HT_AMD
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-127 - Sync behaviour differs on AMD and Nvidia");
-  return;
-#endif
+HIP_TEST_CASE(Unit_hipMemcpy3DSync) {
+  HIP_SKIP_TEST("Sync behaviour differs on AMD and NVIDIA. See AIRUNTIME-2545.");
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
 

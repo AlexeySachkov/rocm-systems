@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -86,17 +86,11 @@ enum class TraceSessionState : Pal::uint32
     Preparing         = 2, ///< Trace has been accepted and is preparing resources before beginning
     Beginning         = 3, ///< Commands are now being submitted to the GPU to begin tracing
     Running           = 4, ///< Trace is in progress
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939
     Postamble         = 5, ///< The detailed frame trace has ended but its data has not yet been written
                            ///  into the session. Some trace sources may still collect data during this time.
     PostambleWaiting  = 6, ///< Waiting for Postamble to complete.
     Completed         = 7, ///< Trace has fully completed. RDF trace data is ready to be pulled out by CollectTrace().
     Count             = 8
-#else
-    Waiting           = 5, ///< Trace has ended, but data has not been written into the session
-    Completed         = 6, ///< Trace has fully completed. RDF trace data is ready to be pulled out by CollectTrace().
-    Count             = 7
-#endif
 };
 
 /// Defines the type of payload. Currently only strings are supported but in the future can include JSON, structs, etc.
@@ -143,6 +137,10 @@ typedef void (PAL_STDCALL *TraceStateChangeCallback)(
 class ITraceController
 {
 public:
+    /// @brief Virtual destructor to ensure proper cleanup of derived classes.
+    virtual ~ITraceController()
+    { }
+
     /// Returns the name of the controller
     ///
     /// @returns the name of the controller as a null terminated string
@@ -166,7 +164,6 @@ public:
     /// canceling the trace when ready.
     virtual Pal::Result OnTraceCanceled() = 0;
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 908
     /// Called by TraceSession to indicate that GPU work is required on the indicated GPU during the preparation phase.
     /// The command buffer must be ready to record commands; however, the trace controller should not submit it
     /// until the trace begins.
@@ -192,7 +189,6 @@ public:
     ///          Otherwise, one of the following errors may be returned:
     ///          + ErrorUnknown if an internal PAL error occurs.
     virtual Pal::Result OnPreparationGpuWork(Pal::uint32 gpuIndex, Pal::ICmdBuffer** ppCmdBuf) = 0;
-#endif
 
     /// Called by TraceSession to indicate that GPU work is required to begin a trace on the indicated GPU
     ///
@@ -269,6 +265,28 @@ public:
     virtual Pal::IQueue* GetTraceQueue() const = 0;
 };
 
+/**
+***********************************************************************************************************************
+* @interface IGlobalConfigListener
+* @brief Interface that allows a single global listener to receive trace configuration updates.
+*
+* This interface is designed for components that need to be notified of global trace configuration settings
+* that affect the entire driver behavior, rather than specific trace sources or controllers. Unlike
+* ITraceController and ITraceSource, this interface does not require registration/unregistration and is
+* intended for a single global listener (typically the DevDriverMgr layer).
+***********************************************************************************************************************
+*/
+class IGlobalConfigListener
+{
+public:
+    /// Called by the associated session to notify the listener of global configuration updates
+    ///
+    /// This is called when the "global" section is present in the trace configuration JSON.
+    ///
+    /// @param [in] pJsonConfig  Configuration data formatted as json and stored as DevDriver's StructuredValue object
+    virtual void OnGlobalConfigUpdated(DevDriver::StructuredValue* pJsonConfig) = 0;
+};
+
 #define COMPRESSION_ARG_VERSION 949
 
 /**
@@ -302,6 +320,10 @@ public:
     virtual void OnConfigUpdated(DevDriver::StructuredValue* pJsonConfig) = 0;
 #endif
 
+    /// @brief Virtual destructor to ensure proper cleanup of derived classes.
+    virtual ~ITraceSource()
+    { }
+
     /// Returns a bitmask that represents which GPUs are relevant to this trace source
     ///
     /// If the bit at index N is set, GPU N must execute work on the GPU in order to produce trace data
@@ -310,7 +332,6 @@ public:
     /// Called by the associated session to notify the source that a new trace has been accepted
     ///
     /// The source may use this notification to do any preparation work that might be required before the trace begins.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 908
     /// A command buffer is provided for the trace source to insert any work into. Note that the work will not be
     /// submitted until the trace begins (at the same time as `OnTraceBegin`). This allows for frontloading of
     /// expensive operations, such as the construction of a GpaSession sample, that would affect runtime speed
@@ -320,9 +341,6 @@ public:
     /// @param [in] pCmdBuf  A command buffer that can be used to record any GPU work required during the
     ///                      preparation phase of the trace. Not submitted until `OnTraceBegin`.
     virtual void OnTraceAccepted(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) = 0;
-#else
-    virtual void OnTraceAccepted() = 0;
-#endif
 
     /// Called by the associated session to notify the source that it should begin a trace
     ///
@@ -367,11 +385,7 @@ public:
     ///
     /// @param [in] gpuIndex The index of the GPU that owns pCmdBuf
     /// @param [in] pCmdBuf  A command buffer that can be used to perform any GPU work required to end the postamble
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939
-    virtual void OnPostambleEnd(
-        Pal::uint32      gpuIndex,
-        Pal::ICmdBuffer* pCmdBuf) = 0;
-#endif
+    virtual void OnPostambleEnd(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) = 0;
 
     /// Called by the associated session to notify the source that the current trace has finished
     ///
@@ -633,7 +647,6 @@ public:
     ///          Otherwise, the error generated by OnEndGpuWork will be returned.
     Pal::Result EndTrace();
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939
     /// Ends the postamble phase, which typically runs until the detailed trace data is available.
     /// This function MUST be called after EndTrace. When this function is called, the session will communicate with
     /// all registered trace sources and notify them of the end of the postamble phase. The provided trace controller
@@ -644,13 +657,12 @@ public:
     /// generated in response to the previous EndTrace call! The generated command buffers MUST also complete
     /// execution on the GPU BEFORE FinishPostamble is called!
     ///
-    /// In situations where multiple GPUs are present, the OnEndPostambleGpuWork function will be called once per GPU index
-    /// for all GPUs that are relevant for the current trace sources.
+    /// In situations where multiple GPUs are present, the OnEndPostambleGpuWork function will be called once per GPU
+    /// index for all GPUs that are relevant for the current trace sources.
     ///
     /// @returns Success if the trace was successfully ended.
     ///          Otherwise, the error generated by OnEndPostambleGpuWork will be returned.
     Pal::Result EndPostamble();
-#endif
 
     /// Notifies the session that the trace operation started by the provided controller has finished.
     ///
@@ -765,6 +777,20 @@ public:
     Pal::Result UnregisterTraceStateChangeCallback(
         TraceStateChangeCallback pfnCallback,
         void*                    pPrivateData);
+
+    /// Sets the global configuration listener for this trace session.
+    ///
+    /// This allows a single component (typically the DevDriverMgr layer) to receive notifications
+    /// about global trace configuration settings that affect the entire driver behavior.
+    /// Unlike trace sources and controllers, only one global listener is supported and no
+    /// registration/unregistration is needed.
+    ///
+    /// @param [in] pListener  The global config listener to set (can be nullptr to clear)
+    void SetGlobalConfigListener(IGlobalConfigListener* pListener)
+    {
+        m_pGlobalConfigListener = pListener;
+    }
+
 private:
     typedef Pal::IPlatform TraceAllocator;
 
@@ -798,6 +824,7 @@ private:
 
     ITraceController*   m_pActiveController; // The controller currently driving the TraceSession.
                                              // We can have only one active controller at a time.
+    Pal::uint32         m_activeGpuIndex;    // GPU index from the active controller's trace queue.
     TraceSessionState   m_sessionState;      // Current state of the TraceSession
     rdfChunkFileWriter* m_pChunkFileWriter;  // Helper struct that manages create chunk file streams
                                              // and write data chunks
@@ -825,5 +852,6 @@ private:
                                                       TraceStateChangeCallbacksVecDefaultCapacity,
                                                       TraceAllocator>;
     TraceStateChangeCallbacksVec m_traceStateChangeCallbacks; // Registered state change callbacks
+    IGlobalConfigListener*       m_pGlobalConfigListener;     // Config listener for driver-wide settings
 };
 } // GpuUtil

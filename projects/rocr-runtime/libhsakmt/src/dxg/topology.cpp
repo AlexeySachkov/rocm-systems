@@ -88,16 +88,28 @@ HSAKMT_STATUS topology_sysfs_get_iolink_props(uint32_t node_id,
   assert(device);
 
   std::memset(&props, 0, sizeof(props));
-  props.IoLinkType = HSA_IOLINKTYPE_PCIEXPRESS;
   props.VersionMajor = props.VersionMinor = 0;
   props.NodeFrom = node_id;
   props.NodeTo = 0;
-  props.Weight = 20;
   props.Flags.ui32.Override = 1;
-  props.Flags.ui32.NonCoherent = 1;
-  props.Flags.ui32.NoAtomics32bit = !(device->SupportPlatformAtomic());
-  props.Flags.ui32.NoAtomics64bit = !(device->SupportPlatformAtomic());
   props.RecSdmaEngIdMask = 0;
+
+  // Differentiate between discrete GPU (dGPU) and integrated GPU (APU)
+  if (device->IsDgpu()) {
+    // Discrete GPU - PCIe link to CPU
+    props.IoLinkType = HSA_IOLINKTYPE_PCIEXPRESS;
+    props.Weight = 20;  // Higher latency for PCIe
+    props.Flags.ui32.NonCoherent = 1;
+    props.Flags.ui32.NoAtomics32bit = !(device->SupportPlatformAtomic());
+    props.Flags.ui32.NoAtomics64bit = !(device->SupportPlatformAtomic());
+  } else {
+    // APU/Integrated GPU - XGMI (Infinity Fabric) or direct coherent link
+    props.IoLinkType = HSA_IOLINK_TYPE_XGMI;
+    props.Weight = 10;  // Lower latency for direct fabric connection
+    props.Flags.ui32.NonCoherent = 0;  // APU has coherent memory access
+    props.Flags.ui32.NoAtomics32bit = 0;  // APU supports 32-bit atomics
+    props.Flags.ui32.NoAtomics64bit = 0;  // APU supports 64-bit atomics
+  }
 
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -164,7 +176,7 @@ static int32_t gpu_get_direct_link_cpu(uint32_t gpu_node,
     return -1;
 
   for (i = 0; i < node_props[gpu_node].node.NumIOLinks; i++)
-    if (props[i].IoLinkType == HSA_IOLINKTYPE_PCIEXPRESS &&
+    if ((props[i].IoLinkType == HSA_IOLINKTYPE_PCIEXPRESS || props[i].IoLinkType == HSA_IOLINK_TYPE_XGMI) &&
         props[i].Weight <= 20) /* >20 is GPU->CPU->GPU */
       return props[i].NodeTo;
 
@@ -589,7 +601,7 @@ hsaKmtGetNodeWallclockFrequency(HSAuint32 NodeId, uint64_t* Frequency) {
   HsaNodeProperties *NodeProperties = &(dxg_topology->g_props[NodeId].node);
   *Frequency = NodeProperties->WallClockKHz * 1000ull;
 
-  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+  return HSAKMT_STATUS_SUCCESS;
 }
 
 uint16_t get_device_id_by_node_id(HSAuint32 node_id) {
@@ -729,23 +741,48 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.CComputeIdLo = 0;
   props.FComputeIdLo = 0;
   props.Capability.ui32.ASICRevision = device->AsicRevision();
-  props.Capability.ui32.WatchPointsTotalBits = std::log2(device->WatchPointsNum());
-  props.MaxWavesPerSIMD = device->WavePerCu() / device->SimdPerCu();
+  uint32_t watch_points_num = device->WatchPointsNum();
+  if (watch_points_num == 0) {
+    pr_warn(
+        "WatchPointsNum is 0 for node %u, forcing WatchPointsTotalBits to 0\n",
+        node_id);
+    props.Capability.ui32.WatchPointsTotalBits = 0;
+  } else {
+    props.Capability.ui32.WatchPointsTotalBits = std::log2(watch_points_num);
+  }
+  uint32_t simd_per_cu = device->SimdPerCu();
+  if (simd_per_cu == 0){
+    pr_err("SimdPerCU is 0 for node %u\n", node_id);
+    return HSAKMT_STATUS_ERROR;
+  }
   props.LDSSizeInKB = device->LdsSize() / 1024;
   props.GDSSizeInKB = 0;
   props.WaveFrontSize = device->WavefrontSize();
   props.NumShaderBanks = device->NumShaderEngine();
   props.NumArrays = device->ShaderArrayPerShaderEngine();
-  props.NumCUPerArray = device->ComputeUnitCount() / props.NumArrays;
-  props.NumSIMDPerCU = device->SimdPerCu();
+  if (props.NumArrays == 0) {
+    pr_warn("NumArrays is 0 for node %u, forcing NumCUPerArray to 0\n",
+            node_id);
+    props.NumCUPerArray = 0;
+  } else {
+    props.NumCUPerArray = device->ComputeUnitCount() / props.NumArrays;
+  }
+  props.NumSIMDPerCU = simd_per_cu;
   props.MaxSlotsScratchCU = device->MaxScratchSlotsPerCu();
+
+  // MaxWavesPerSIMD = (waves per CU) / (SIMDs per CU)
+  // WKMI provides wave_per_cu which is the total waves per CU.
+  // We need to divide by NumSIMDPerCU to get waves per SIMD.
+  props.MaxWavesPerSIMD = device->WavePerCu() / simd_per_cu;
+
   props.VendorId = 0x1002;
   props.DeviceId = device->DeviceId();
   props.LocationId = device->PciBusAddr();
   props.LocalMemSize = 0;
   props.MaxEngineClockMhzFCompute = device->MaxEngineClockMhz();
   props.DrmRenderMinor = node_id;
-  props.Capability2.ui32.AqlEmulationPm4_ = device->IsAqlSupported() ? 0 : 1;
+  props.Capability2.ui32.AqlEmulationPm4_ =
+      (device->IsAqlSupported() && device->DeviceInfo().hwsInfo.hwsMask.computeHwsEnabled) ? 0 : 1;
 
   {
     const char* name = device->ProductName();
@@ -765,11 +802,10 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.NumGws = 0;
   /*
    * In Native Linux, if the asic is APU, this value will be set to 1,
-   * if the asic is dGPU, this value will be set to 0. clr use this info
-   * to set hostUnifiedMemory_, but for now wsl does not support this feature.
-   * Therefore, force vaule to 0 temporarily.
+   * if the asic is dGPU, this value will be set to 0. clr uses this info
+   * to set hostUnifiedMemory_.
    */
-  props.Integrated = 0;
+  props.Integrated = !device->IsDgpu();
   props.Domain = device->Domain();
   props.UniqueID = device->Uuid();
   props.NumXcc = device->NumXcc();
@@ -813,6 +849,8 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
     assert(props.EngineId.ui32.Major && "HSA_OVERRIDE_GFX_VERSION may be needed");
   }
 
+  props.WallClockKHz = device->GPUCounterFrequency() / 1000ull;
+
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -838,7 +876,7 @@ HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id, uint32_t mem_id,
   assert(device);
 
   props.HeapType = HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE;
-  props.SizeInBytes = device->LocalHeapSize();
+  props.SizeInBytes = device->VramTotal();
   props.Width = device->MemoryBusWidth();
   props.MemoryClockMax = device->MaxMemoryClockMhz();
 

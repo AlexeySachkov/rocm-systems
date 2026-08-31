@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "test_base.h"
 
@@ -128,7 +109,7 @@ void TestBase::SetUp(uint64_t init_flags) {
 
   // allocate memory
   sockets_.resize(socket_count_);
-  err = amdsmi_get_socket_handles(&socket_count_, &sockets_[0]);
+  err = amdsmi_get_socket_handles(&socket_count_, sockets_.data());
   if (err != AMDSMI_STATUS_SUCCESS) {
     setup_failed_ = true;
   }
@@ -146,7 +127,7 @@ void TestBase::SetUp(uint64_t init_flags) {
     ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
 
     std::vector<amdsmi_processor_handle> processor_handles(device_count);
-    err = amdsmi_get_processor_handles(sockets_[i], &device_count, &processor_handles[0]);
+    err = amdsmi_get_processor_handles(sockets_[i], &device_count, processor_handles.data());
     if (err != AMDSMI_STATUS_SUCCESS) {
       setup_failed_ = true;
     }

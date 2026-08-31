@@ -33,6 +33,11 @@ __global__ void kernel_printf_thread(int* count) {
   count[tid] = printf("%s", CONST_STR);
 }
 
+__global__ void kernel_printf_duplicate_format_string(int* count) {
+  count[0] = printf("Duplicate format string: %d\n", 1);
+  count[1] = printf("Duplicate format string: %d\n", 2);
+}
+
 /**
  * @addtogroup printf printf
  * @{
@@ -53,12 +58,11 @@ __global__ void kernel_printf_thread(int* count) {
  * - HIP_VERSION >= 5.7
  */
 
-TEST_CASE(Unit_NonHost_Printf_basic) {
+HIP_TEST_CASE(Unit_NonHost_Printf_basic) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   int *count{nullptr}, *count_d{nullptr};
 
@@ -77,6 +81,38 @@ TEST_CASE(Unit_NonHost_Printf_basic) {
 /**
  * Test Description
  * ------------------------
+ * - Verify that buffered printf accepts duplicate metadata entries for the same format string.
+ * Test source
+ * ------------------------
+ * - catch/unit/printf/printfNonHost.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 5.7
+ */
+HIP_TEST_CASE(Unit_NonHost_Printf_Positive_DuplicateFormatStringMetadata) {
+  int pcieAtomic = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  if (!pcieAtomic) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+  }
+
+  int* count_d = nullptr;
+  int count[2] = {};
+  HIP_CHECK(hipMalloc(&count_d, sizeof(count)));
+
+  hipLaunchKernelGGL(kernel_printf_duplicate_format_string, dim3(1), dim3(1), 0, 0, count_d);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(count, count_d, sizeof(count), hipMemcpyDeviceToHost));
+
+  REQUIRE(count[0] == 0);
+  REQUIRE(count[1] == 0);
+  HIP_CHECK(hipFree(count_d));
+}
+
+/**
+ * Test Description
+ * ------------------------
  * - Test case to verify the printf return value for big buffer for -mprintf-kind=buffered compiler
  * option
  * - Call the printf API for number of iterations in the Kernel Function. Printf should return -1
@@ -88,12 +124,11 @@ TEST_CASE(Unit_NonHost_Printf_basic) {
  * - HIP_VERSION >= 5.7
  */
 
-TEST_CASE(Unit_NonHost_Printf_loop) {
+HIP_TEST_CASE(Unit_NonHost_Printf_loop) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   int *count{nullptr}, *count_d{nullptr};
   count = reinterpret_cast<int*>(malloc(ITER_COUNT * sizeof(int)));
@@ -130,12 +165,11 @@ TEST_CASE(Unit_NonHost_Printf_loop) {
  * - HIP_VERSION >= 5.7
  */
 
-TEST_CASE(Unit_NonHost_Printf_multiple_Threads) {
+HIP_TEST_CASE(Unit_NonHost_Printf_multiple_Threads) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   int *count{nullptr}, *count_d{nullptr};
   fprintf(stderr, "VALID_COUNT=%d, ITER_COUNT_FOR_THREAD=%d\n", VALID_COUNT, ITER_COUNT_FOR_THREAD);
@@ -175,12 +209,11 @@ TEST_CASE(Unit_NonHost_Printf_multiple_Threads) {
  * - HIP_VERSION >= 5.7
  */
 
-TEST_CASE(Unit_NonHost_Printf_BufferAvailability) {
+HIP_TEST_CASE(Unit_NonHost_Printf_BufferAvailability) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   int *count{nullptr}, *count_d{nullptr};
 

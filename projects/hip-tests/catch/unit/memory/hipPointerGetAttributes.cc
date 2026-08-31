@@ -209,7 +209,7 @@ void clusterAllocs(int numAllocs, size_t minSize, size_t maxSize) {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE(Unit_hipPointerGetAttributes_Basic) {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_Basic) {
   HIP_CHECK(hipSetDevice(0));
   Nbytes = N * sizeof(char);
   printf("\n");
@@ -294,7 +294,7 @@ TEST_CASE(Unit_hipPointerGetAttributes_Basic) {
  *  - HIP_VERSION >= 5.7
  */
 
-TEST_CASE(Unit_hipPointerGetAttributes_ClusterAlloc) {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_ClusterAlloc) {
   srand(0x100);
   printf("\n=============================================\n");
   clusterAllocs(100, 1024 * 1, 1024 * 1024);
@@ -311,7 +311,7 @@ TEST_CASE(Unit_hipPointerGetAttributes_ClusterAlloc) {
  *  - HIP_VERSION >= 5.7
  */
 
-TEST_CASE(Unit_hipPointerGetAttributes_TinyClusterAlloc) {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_TinyClusterAlloc) {
   srand(0x200);
   printf("\n=============================================\n");
   clusterAllocs(1000, 1, 10);  //  Many tiny allocations;
@@ -321,7 +321,7 @@ TEST_CASE(Unit_hipPointerGetAttributes_TinyClusterAlloc) {
 // IN : serialize will force the test to run in serial fashion.
 #if 0  // FIXME_jatinx These need to be ported to HIP_CHECK_THREAD.
 Disabling it for now
-TEST_CASE(Unit_hipPointerGetAttributes_MultiThread) {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_MultiThread) {
   srand(0x300);
   auto serialize = 1;
   printf("\n=============================================\n");
@@ -354,7 +354,7 @@ TEST_CASE(Unit_hipPointerGetAttributes_MultiThread) {
  *  - HIP_VERSION >= 5.7
  */
 
-TEST_CASE(Unit_hipPointerGetAttributes_Negative) {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_Negative) {
 #if HT_AMD  // Nvidia crashed in hipPointerGetAttributes on nullptr
   SECTION("Invalid Attributes Pointer") {
     int* dPtr{nullptr};
@@ -377,7 +377,7 @@ TEST_CASE(Unit_hipPointerGetAttributes_Negative) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipPointerGetAttributes_GpuIter) {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_GpuIter) {
   int deviceCount{0};
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   REQUIRE(deviceCount != 0);
@@ -437,16 +437,14 @@ TEST_CASE(Unit_hipPointerGetAttributes_GpuIter) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipPointerGetAttributes_GpuIter_Managed__Memory) {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_GpuIter_Managed__Memory) {
   int deviceCount{0};
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   REQUIRE(deviceCount != 0);
   int* managed_ptr{nullptr};
   for (int i = 0; i < deviceCount; i++) {
     HIP_CHECK(hipSetDevice(i));
-    int managed_memory = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
-    if (!managed_memory) {
+    if (!HipTest::isManagedMemorySupportedOnDevice(i)) {
       INFO("Managed memory access not supported on the device" << i);
     } else {
       // Allocating the memory and test changes only if managed
@@ -474,7 +472,7 @@ TEST_CASE(Unit_hipPointerGetAttributes_GpuIter_Managed__Memory) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipPointerGetAttributes_GpuIter_Unregistered_Memory) {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_GpuIter_Unregistered_Memory) {
   int deviceCount{0};
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   REQUIRE(deviceCount != 0);

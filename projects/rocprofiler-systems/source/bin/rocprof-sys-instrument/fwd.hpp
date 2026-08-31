@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -32,7 +13,6 @@
 #include <timemory/tpls/cereal/archives.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/utility/argparse.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/popen.hpp>
 #include <timemory/variadic/macros.hpp>
 
@@ -92,7 +72,6 @@ struct basic_block_signature;
 struct module_function;
 
 using string_t               = std::string;
-using string_view_t          = std::string_view;
 using stringstream_t         = std::stringstream;
 using strvec_t               = std::vector<string_t>;
 using strset_t               = std::set<string_t>;
@@ -191,11 +170,13 @@ extern bool   loop_level_instr;
 extern bool   instr_dynamic_callsites;
 extern bool   instr_traps;
 extern bool   instr_loop_traps;
-extern bool   parse_all_modules;
+extern bool   exclude_internal_lib_paths;
+extern bool   exe_only;
 extern size_t min_address_range;
 extern size_t min_loop_address_range;
 extern size_t min_instructions;
 extern size_t min_loop_instructions;
+extern size_t max_library_functions;
 //
 //  debug settings
 //
@@ -274,7 +255,7 @@ extern std::unique_ptr<std::ofstream> log_ofs;
             if(debug_print || verbose_level >= LEVEL)                                    \
                 fprintf(stderr, "[rocprof-sys][exe] Error! " __VA_ARGS__);               \
             char _buff[FUNCNAMELEN];                                                     \
-            sprintf(_buff, "[rocprof-sys][exe] Error! " __VA_ARGS__);                    \
+            snprintf(_buff, FUNCNAMELEN, "[rocprof-sys][exe] Error! " __VA_ARGS__);      \
             throw std::runtime_error(std::string{ _buff });                              \
         }                                                                                \
         else                                                                             \
@@ -358,10 +339,16 @@ insert_instr(address_space_t* mutatee, Tp traceFunc, procedure_loc_t traceLoc,
              basic_block_t* basicBlock, bool allow_traps = instr_traps);
 
 procedure_t*
-find_function(image_t* appImage, const string_t& functionName, const strset_t& = {});
+find_function(const std::vector<module_t*>& modules, const string_t& functionName,
+              const strset_t& = {});
+
+procedure_t*
+find_function(const std::vector<object_t*>& objects, const string_t& functionName,
+              const strset_t& = {});
 
 symtab_symbol_t*
-find_undefined_function_symbol(image_t* app_image, const std::string& _name);
+find_undefined_function_symbol(const std::unordered_set<object_t*>& objects,
+                               const std::string&                   _name);
 
 void
 error_func_real(error_level_t level, int num, const char* const* params);
@@ -377,6 +364,21 @@ get_name(module_t*);
 
 symtab_func_t*
 get_symtab_function(procedure_t*);
+
+size_t
+get_object_procedure_count_lb(object_t*);
+
+std::vector<object_t*>
+filter_objects(std::vector<object_t*>* app_objects);
+
+std::vector<module_t*>
+filter_modules(std::vector<module_t*>* app_modules);
+
+std::unique_ptr<std::vector<module_t*>>
+get_modules(std::vector<object_t*>* app_objects);
+
+std::unique_ptr<std::vector<procedure_t*>>
+get_procedures(std::vector<module_t*>* app_modules, bool include_uninstrumentable);
 
 namespace std
 {

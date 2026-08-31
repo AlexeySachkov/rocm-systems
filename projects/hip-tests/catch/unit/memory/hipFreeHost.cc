@@ -18,7 +18,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipFreeHost_InvalidMemory) {
+HIP_TEST_CASE(Unit_hipFreeHost_InvalidMemory) {
   SECTION("Nullptr") { HIP_CHECK(hipFreeHost(nullptr)); }
 
   SECTION("Invalid ptr") {
@@ -60,7 +60,7 @@ TEST_CASE(Unit_hipFreeHost_InvalidMemory) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipFreeHost_DoubleFree) {
+HIP_TEST_CASE(Unit_hipFreeHost_DoubleFree) {
   void* ptr = NULL;
   size_t ptr_size = 1024;
 
@@ -80,7 +80,7 @@ TEST_CASE(Unit_hipFreeHost_DoubleFree) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipFreeHost_Multithreading) {
+HIP_TEST_CASE(Unit_hipFreeHost_Multithreading) {
   std::vector<unsigned long*> ptrs(10);
   size_t ptr_size = 1024;
 
@@ -103,7 +103,7 @@ TEST_CASE(Unit_hipFreeHost_Multithreading) {
   HIP_CHECK_THREAD_FINALIZE();
 }
 
-TEST_CASE(Unit_hipFreeHost_Capture_negative) {
+HIP_TEST_CASE(Unit_hipFreeHost_Capture_negative) {
   void* ptr = nullptr;
   constexpr size_t kPtrSize = 1024;
 
@@ -114,4 +114,10 @@ TEST_CASE(Unit_hipFreeHost_Capture_negative) {
   BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
   HIP_CHECK_ERROR(hipFreeHost(ptr), capture_error);
   END_CAPTURE_SYNC(capture_error);
+
+  // When the free is rejected during capture it is a no-op, so the allocation
+  // is still owned by the test and must be released to avoid leaking it.
+  if (capture_error != hipSuccess) {
+    HIP_CHECK(hipFreeHost(ptr));
+  }
 }

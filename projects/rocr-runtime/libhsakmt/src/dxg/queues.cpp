@@ -24,6 +24,7 @@
  */
 
 #include <cinttypes>
+#include <mutex>
 #include "impl/wddm/device.h"
 #include "impl/wddm/queue.h"
 #include "hsa-runtime/inc/amd_hsa_signal.h"
@@ -56,12 +57,28 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueue(HSAuint32 NodeId,
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
+  HSA_QUEUE_TYPE Type,
+  HSAuint32 QueuePercentage,
+  HSA_QUEUE_PRIORITY Priority,
+  HSAuint32 SdmaEngineId,
+  void *QueueAddress,
+  HSAuint64 QueueSizeInBytes,
+  HsaEvent *Event,
+  HsaQueueResource *QueueResource) {
+
+  return hsaKmtCreateQueueV2(NodeId, Type, QueuePercentage, Priority, 0,
+    QueueAddress, QueueSizeInBytes, 0, Event,
+    QueueResource);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2(HSAuint32 NodeId,
 					     HSA_QUEUE_TYPE Type,
 					     HSAuint32 QueuePercentage,
 					     HSA_QUEUE_PRIORITY Priority,
 					     HSAuint32 SdmaEngineId,
 					     void *QueueAddress,
 					     HSAuint64 QueueSizeInBytes,
+					     HSAuint64 MetaDataPrefetchSizeInBytes,
 					     HsaEvent *Event,
 					     HsaQueueResource *QueueResource) {
   HSAKMT_STATUS result;
@@ -69,9 +86,24 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
   CHECK_DXG_OPEN();
   assert(Event == nullptr);
 
+#if defined(__linux__)
+  // Defer resolving libhsa-runtime64 symbols until a queue is actually needed.
+  // call_once latches success/failure; a failed resolve fails every subsequent
+  // queue create too (retrying can't help if the library isn't resident).
+  static std::once_flag loader_once;
+  static bool loader_ok = false;
+  std::call_once(loader_once, [] { loader_ok = hsakmt_hsa_loader_init(); });
+  if (!loader_ok)
+    return HSAKMT_STATUS_ERROR;
+#endif
+
   if (Priority < HSA_QUEUE_PRIORITY_MINIMUM ||
       Priority > HSA_QUEUE_PRIORITY_MAXIMUM)
     return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  if (MetaDataPrefetchSizeInBytes) {
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+  }
 
   wsl::thunk::WDDMDevice *device_ = get_wddmdev(NodeId);
   assert(device_);
@@ -182,6 +214,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfo(HSA_QUEUEID QueueId,
   return HSAKMT_STATUS_SUCCESS;
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetKernelQueueId(HSA_QUEUEID QueueId,
+                                               HSAuint32 *KernelInternalQueueId) {
+  CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetTrapHandler(HSAuint32 Node,
                                              void *TrapHandlerBaseAddress,
                                              HSAuint64 TrapHandlerSizeInBytes,
@@ -223,4 +262,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId, uint64_t va
 
   queue_->RingDoorbell(value);
   return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetSigbusDelay(HSAuint32 /*NodeId*/,
+                                             HSAuint32 /*DelayMs*/) {
+  return HSAKMT_STATUS_NOT_SUPPORTED;
 }

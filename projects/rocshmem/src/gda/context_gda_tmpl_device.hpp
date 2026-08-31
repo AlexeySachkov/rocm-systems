@@ -28,6 +28,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "constmem.hpp"
+#include "log.hpp"
 #include "util.hpp"
 #include "context_gda_device.hpp"
 #include "gda_team.hpp"
@@ -45,9 +46,10 @@ namespace rocshmem {
 template <typename T>
 __device__ void GDAContext::p(T *dest, T value, int pe) {
   int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
-    long L_offset{reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
-    ipcImpl_.ipcCopy(ipcImpl_.ipc_bases[local_pe] + L_offset, reinterpret_cast<void *>(&value), sizeof(T));
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy<MemcpyKind::Put>(remote, reinterpret_cast<void *>(&value), sizeof(T), local_pe);
     return;
   }
   putmem_nbi(dest, &value, sizeof(T), pe);
@@ -65,16 +67,15 @@ __device__ void GDAContext::put_nbi(T *dest, const T *source, size_t nelems, int
 
 template <typename T>
 __device__ T GDAContext::g(const T *source, int pe) {
-  T ret;
+  T ret{};
   int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
-    const char *src_typed{reinterpret_cast<const char *>(source)};
-    long L_offset{const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
-    ipcImpl_.ipcCopy(&ret, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T));
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy<MemcpyKind::Get>(&ret, remote, sizeof(T), local_pe);
     return ret;
   }
-  printf("rocshmem::gda:g not implemented\n");
-  abort();
+  LOGD_ERROR_ABORT("gda::g not implemented");
   //TODO the following is incorrect because ret is not ibv registered memory
   //getmem(&ret, source, sizeof(T), pe);
   return ret;
@@ -93,15 +94,17 @@ __device__ void GDAContext::get_nbi(T *dest, const T *source, size_t nelems, int
 // Atomics
 template <typename T>
 __device__ void GDAContext::amo_add(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_add not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_add not implemented for non-64bit types"); }//TODO:support for non-uint64t
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+  auto [raddr, rkey] = qps[qp_index].get_raddr_info(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   while (turns) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      qps[pe].atomic_nofetch(base_heap[pe] + L_offset, value, 0, pe);
+      qps[qp_index].atomic_add(reinterpret_cast<void *>(raddr), rkey, value, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -115,8 +118,10 @@ __device__ void GDAContext::amo_set(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_set not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_set not implemented for non-64bit types"); }//TODO:support for non-uint64t
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+  auto [raddr, rkey] = qps[qp_index].get_raddr_info(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -130,8 +135,8 @@ __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
        * The compare-and-swap loop will execute at least twice if wrong.
        * It may run additional times if contention on memory location.
        */
-      while ((ret_val = qps[pe].atomic_cas(base_heap[pe] + L_offset, value,
-                         cond, pe)) != cond) {
+      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
+             reinterpret_cast<void *>(raddr), rkey, value, cond, wf_info)) != cond) {
         cond = ret_val;
       }
       need_turn = false;
@@ -143,8 +148,10 @@ __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fetch_and not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fetch_and not implemented for non-64bit types"); }//TODO:support for non-uint64t
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+  auto [raddr, rkey] = qps[qp_index].get_raddr_info(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -154,8 +161,8 @@ __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      while ((ret_val = qps[pe].atomic_cas(base_heap[pe] + L_offset,
-                         desired_val, cond, pe)) != cond) {
+      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
+             reinterpret_cast<void *>(raddr), rkey, desired_val, cond, wf_info)) != cond) {
         cond = ret_val;
         desired_val = ret_val & value;
       }
@@ -173,8 +180,10 @@ __device__ void GDAContext::amo_and(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fetch_or not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fetch_or not implemented for non-64bit types"); }//TODO:support for non-uint64t
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+  auto [raddr, rkey] = qps[qp_index].get_raddr_info(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -184,8 +193,8 @@ __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      while ((ret_val = qps[pe].atomic_cas(base_heap[pe] + L_offset,
-                         desired_val, cond, pe)) != cond) {
+      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
+             reinterpret_cast<void *>(raddr), rkey, desired_val, cond, wf_info)) != cond) {
         cond = ret_val;
         desired_val = ret_val | value;
       }
@@ -203,8 +212,10 @@ __device__ void GDAContext::amo_or(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fetch_xor not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fetch_xor not implemented for non-64bit types"); }//TODO:support for non-uint64t
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+  auto [raddr, rkey] = qps[qp_index].get_raddr_info(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -214,8 +225,8 @@ __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      while ((ret_val = qps[pe].atomic_cas(base_heap[pe] + L_offset,
-                         desired_val, cond, pe)) != cond) {
+      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
+             reinterpret_cast<void *>(raddr), rkey, desired_val, cond, wf_info)) != cond) {
         cond = ret_val;
         desired_val = ret_val ^ value;
       }
@@ -233,15 +244,17 @@ __device__ void GDAContext::amo_xor(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void GDAContext::amo_cas(void *dst, T value, T cond, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_cas not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_cas not implemented for non-64bit types"); }//TODO:support for non-uint64t
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+  auto [raddr, rkey] = qps[qp_index].get_raddr_info(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   while (turns) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      qps[pe].atomic_cas_nofetch(base_heap[pe] + L_offset, value, cond, pe);
+      qps[qp_index].atomic_cas_nofetch(reinterpret_cast<void *>(raddr), rkey, value, cond, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -250,8 +263,10 @@ __device__ void GDAContext::amo_cas(void *dst, T value, T cond, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fadd not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fadd not implemented for non-64bit types"); }//TODO:support for non-uint64t
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+  auto [raddr, rkey] = qps[qp_index].get_raddr_info(dst);
   T ret_val = 0;
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
@@ -259,7 +274,7 @@ __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      ret_val =  qps[pe].atomic_fetch(base_heap[pe] + L_offset, value, 0, pe);
+      ret_val =  qps[qp_index].atomic_fetch_add(reinterpret_cast<void *>(raddr), rkey, value, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -269,8 +284,10 @@ __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fcas not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fcas not implemented for non-64bit types"); }//TODO:support for non-uint64t
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+  auto [raddr, rkey] = qps[qp_index].get_raddr_info(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -278,7 +295,7 @@ __device__ T GDAContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      ret_val = qps[pe].atomic_cas(base_heap[pe] + L_offset, value, cond, pe);
+      ret_val = qps[qp_index].atomic_cas(reinterpret_cast<void *>(raddr), rkey, value, cond, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -296,8 +313,8 @@ __device__ void gda_compute_reduce(T *src, T *dst, int size, int wg_id, int wg_s
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ void GDAContext::internal_direct_allreduce(
-    T *dst, const T *src, int nelems, GDATeam *team_obj) {  // NOLINT(runtime/int)
+__device__ void GDAContext::internal_direct_allreduce_wg(T *dst, const T *src,
+    int nelems, GDATeam *team_obj, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
 
   int stride = team_obj->tinfo_wrt_world->stride;
   int PE_start = team_obj->tinfo_wrt_world->pe_start;
@@ -306,7 +323,7 @@ __device__ void GDAContext::internal_direct_allreduce(
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
 
   int finish = PE_start + stride * PE_size;
-  int pe = my_pe;
+  int pe = constmem.my_pe;
 
   int wg_id = get_flat_block_id();
   int wg_size = get_flat_block_size();
@@ -319,12 +336,12 @@ __device__ void GDAContext::internal_direct_allreduce(
 
   for (int i = PE_start; i < finish; i += stride) {
     if (i != pe) {
-      putmem_wg(&pWrk[pe * nelems], reinterpret_cast<const void *>(src),
-                nelems * sizeof(T), i);
+      internal_putmem_wg(&pWrk[pe * nelems], reinterpret_cast<const void *>(src),
+        nelems * sizeof(T), i, i, wf_info);
 
       if (is_thread_zero_in_block()) {
         fence();
-        putmem(&pSync[pe], &flag_val, sizeof(*pSync), i);
+        internal_putmem(&pSync[pe], &flag_val, sizeof(*pSync), i, i, wf_info);
       }
     }
   }
@@ -348,11 +365,124 @@ __device__ void GDAContext::internal_direct_allreduce(
 
   __syncthreads();
 
-  for (int i = wg_id; i < num_pes; i += wg_size) {
+  for (int i = wg_id; i < constmem.num_pes; i += wg_size) {
     pSync[i] = ROCSHMEM_SYNC_VALUE;
   }
   threadfence_system();
   __syncthreads();
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ void GDAContext::internal_direct_allreduce_wave(T *dst, const T *src,
+    int nelems, GDATeam *team_obj, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
+
+  int stride = team_obj->tinfo_wrt_world->stride;
+  int PE_start = team_obj->tinfo_wrt_world->pe_start;
+  int PE_size = team_obj->tinfo_wrt_world->size;
+  long *pSync = team_obj->reduce_pSync;
+  T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
+
+  int finish = PE_start + stride * PE_size;
+  int pe = constmem.my_pe;
+  int wf_tid = get_flat_block_id() % WF_SIZE;
+  int64_t flag_val = 1;
+
+  // Initialize local dst from src
+  for (int i = wf_tid; i < nelems; i += WF_SIZE) {
+    dst[i] = src[i];
+  }
+
+  // Put src to pWrk on all other PEs and signal via pSync
+  for (int i = PE_start; i < finish; i += stride) {
+    if (i != pe) {
+      internal_putmem_nbi_wave(&pWrk[pe * nelems],
+        reinterpret_cast<const void *>(src), nelems * sizeof(T), i, i, wf_info);
+      if (is_thread_zero_in_wave()) {
+        qps[i].quiet(wf_info);
+        internal_putmem(&pSync[pe], &flag_val, sizeof(*pSync), i, i, wf_info);
+      }
+    }
+  }
+
+  // Reduce contributions from all other PEs into dst
+  for (int i = PE_start; i < finish; i += stride) {
+    if (i != pe) {
+      if (is_thread_zero_in_wave()) {
+        wait_until(&pSync[i], ROCSHMEM_CMP_EQ, flag_val);
+      }
+      T *ptr = &pWrk[i * nelems];
+      for (int j = wf_tid; j < nelems; j += WF_SIZE) {
+        OpWrap<Op>::Calc(ptr, dst, j);
+      }
+    }
+  }
+
+  // Reset pSync entries
+  if (is_thread_zero_in_wave()) {
+    for (int i = 0; i < constmem.num_pes; i++) {
+      pSync[i] = ROCSHMEM_SYNC_VALUE;
+    }
+    __threadfence_system();
+  }
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int GDAContext::reduce_wave(rocshmem_team_t team, T *dest,
+                                       const T *source, int nreduce) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int PE_size = team_obj->tinfo_wrt_world->size;
+
+  size_t direct_pWrk = PE_size * nreduce;
+  size_t direct_pSync = PE_size;
+  size_t provided_pWrk = max(nreduce / 2 + 1, ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE);
+  size_t provided_pSync = ROCSHMEM_REDUCE_SYNC_SIZE;
+
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wave);
+
+  size_t ring_pSync = 2 * PE_size;
+
+  if (provided_pWrk >= direct_pWrk && provided_pSync >= direct_pSync) {
+    internal_direct_allreduce_wave<T, Op>(dest, source, nreduce, team_obj, wf_info);
+  } else {
+    if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
+      size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
+      int chunk_size = ring_pWrk / PE_size;
+      int seg_size = chunk_size * PE_size;
+
+      int n_seg = nreduce / seg_size;
+      int n_seg_up = (nreduce - 1) / seg_size + 1;
+
+      if (n_seg > 0) {
+        internal_ring_allreduce_wave<T, Op>(dest, source, nreduce, team_obj,
+          n_seg, seg_size, chunk_size, wf_info);
+      }
+      if (n_seg_up > n_seg) {
+        T *p_dst = (dest + (n_seg * seg_size));
+        const T *p_src = (source + (n_seg * seg_size));
+        int p_count = nreduce - (n_seg * seg_size);
+        int p_chunk = p_count / PE_size;
+
+        if (p_chunk > 0) {
+          internal_ring_allreduce_wave<T, Op>(p_dst, p_src, 
+            (p_chunk * PE_size), team_obj, 1, 
+            (p_chunk * PE_size), p_chunk, wf_info);
+        }
+
+        if ((p_chunk * PE_size) < p_count) {
+          p_count -= (p_chunk * PE_size);
+          p_dst += (p_chunk * PE_size);
+          const T *p_src2 = p_src + (p_chunk * PE_size);
+          internal_direct_allreduce_wave<T, Op>(p_dst, p_src2, p_count, team_obj, wf_info);
+        }
+      }
+    } else {
+      LOGD_WARN("Unsupported reduction size for GDA wave conduit.");
+      return ROCSHMEM_ERROR;
+    }
+  }
+  barrier_wave(team);
+  return ROCSHMEM_SUCCESS;
 }
 
 /*
@@ -412,12 +542,10 @@ __device__ void GDAContext::internal_direct_allreduce(
  *        [03+13+23+33]  [03+13+23+33] [03+13+23+33]  [03+13+23+33]
  */
 template <typename T, ROCSHMEM_OP Op>
-__device__ void GDAContext::internal_ring_allreduce(
-    T *dst, const T *src, int nelems, GDATeam *team_obj,  // NOLINT(runtime/int)
-    int n_seg, int seg_size, int chunk_size) {
+__device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
+    int nelems, GDATeam *team_obj,  // NOLINT(runtime/int)
+    int n_seg, int seg_size, int chunk_size, ActiveWFInfo &wf_info) {
 
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int PE_start = team_obj->tinfo_wrt_world->pe_start;
   int PE_size = team_obj->tinfo_wrt_world->size;
   long *pSync = team_obj->reduce_pSync;
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
@@ -444,20 +572,22 @@ __device__ void GDAContext::internal_ring_allreduce(
       off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
       off_recv = (((my_pe_in_team - iter + 2 * PE_size) % PE_size) * chunk_size);
 
-      putmem_wg(reinterpret_cast<void *>(&pWrk[off_send]),
-                reinterpret_cast<void *>(&dst[off_send + off_seg]),
-                chunk_size * sizeof(T), send_pe);
+      internal_putmem_wg(reinterpret_cast<void *>(&pWrk[off_send]),
+        reinterpret_cast<void *>(&dst[off_send + off_seg]),
+        chunk_size * sizeof(T), send_pe, send_pe, wf_info);
+      
+      fence();
 
       if (is_thread_zero_in_block()) {
-        fence();
-
         wait_val = seg + 100;
-        putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
+        internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
+          send_pe, wf_info);
 #if defined(__gfx90a__)
         __threadfence_system();
 #endif /* __gfx90a__ */
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
+      fence();
       __syncthreads();
       gda_compute_reduce<T, Op>(&pWrk[off_recv], &dst[off_seg + off_recv],
                                 chunk_size, wg_id, wg_size);
@@ -466,32 +596,109 @@ __device__ void GDAContext::internal_ring_allreduce(
     // Loop 2 in the example above
     for (int iter = PE_size - 1; iter < 2 * PE_size - 2; iter++) {
       off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
-      putmem_nbi_wg(reinterpret_cast<void *>(&dst[off_send + off_seg]),
-                    reinterpret_cast<void *>(&dst[off_send + off_seg]),
-                    chunk_size * sizeof(T), send_pe);
-
+      internal_putmem_nbi_wg(reinterpret_cast<void *>(&dst[off_send + off_seg]),
+        reinterpret_cast<void *>(&dst[off_send + off_seg]),
+        chunk_size * sizeof(T), send_pe, send_pe, wf_info);
+      fence();
       if (is_thread_zero_in_block()) {
-        fence();
-        wait_val = seg + 100;
-        putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
+        wait_val = seg + 10;
+        internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
+          send_pe, wf_info);
 #if defined(__gfx90a__)
         __threadfence_system();
 #endif /* __gfx90a__ */
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
+      fence();
       __syncthreads();
     }
   }
   __syncthreads();
 
-  for (int i = wg_id; i < 2 * num_pes - 2; i += wg_size) {
+  for (int i = wg_id; i < 2 * constmem.num_pes - 2; i += wg_size) {
     pSync[i] = ROCSHMEM_SYNC_VALUE;
   }
   __syncthreads();
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
+__device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
+    int nelems, GDATeam *team_obj,  // NOLINT(runtime/int)
+    int n_seg, int seg_size, int chunk_size, ActiveWFInfo &wf_info) {
+
+  int PE_size = team_obj->tinfo_wrt_world->size;
+  long *pSync = team_obj->reduce_pSync;
+  T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
+  int my_pe_in_team = team_obj->my_pe;
+
+  int off_seg, off_send, off_recv;
+  int send_pe = (my_pe_in_team + 1) % PE_size;
+  send_pe = team_obj->get_pe_in_world(send_pe);
+  long wait_val;  // NOLINT(runtime/int)
+
+  int wf_tid = get_flat_block_id() % WF_SIZE;
+
+  for (int i = wf_tid; i < nelems; i += WF_SIZE) {
+    dst[i] = src[i];
+  }
+
+  for (int seg = 0; seg < n_seg; seg++) {
+    off_seg = seg * seg_size;
+    // Loop 1: reduce-scatter
+    for (int iter = 0; iter < PE_size - 1; iter++) {
+      off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
+      off_recv = (((my_pe_in_team - iter + 2 * PE_size) % PE_size) * chunk_size);
+
+      internal_putmem_wave(reinterpret_cast<void *>(&pWrk[off_send]),
+        reinterpret_cast<void *>(&dst[off_send + off_seg]),
+        chunk_size * sizeof(T), send_pe, send_pe, wf_info);
+      fence();
+      if (is_thread_zero_in_wave()) {
+        qps[send_pe].quiet(wf_info);
+        wait_val = seg + 100;
+        internal_putmem_wave(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
+          send_pe, wf_info);
+#if defined(__gfx90a__)
+        __threadfence_system();
+#endif /* __gfx90a__ */
+        wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
+      }
+      fence();
+      for (int j = wf_tid; j < chunk_size; j += WF_SIZE) {
+        OpWrap<Op>::Calc(&pWrk[off_recv], &dst[off_seg + off_recv], j);
+      }
+    }
+
+    // Loop 2: all-gather
+    for (int iter = PE_size - 1; iter < 2 * PE_size - 2; iter++) {
+      off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
+      internal_putmem_nbi_wave(reinterpret_cast<void *>(&dst[off_send + off_seg]),
+        reinterpret_cast<void *>(&dst[off_send + off_seg]),
+        chunk_size * sizeof(T), send_pe, send_pe, wf_info);
+      fence();
+      if (is_thread_zero_in_wave()) {
+        qps[send_pe].quiet(wf_info);
+        wait_val = seg + 10;
+        internal_putmem_wave(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
+          send_pe, wf_info);
+#if defined(__gfx90a__)
+        __threadfence_system();
+#endif /* __gfx90a__ */
+        wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
+      }
+    }
+  }
+
+  if (is_thread_zero_in_wave()) {
+    for (int i = 0; i < 2 * constmem.num_pes - 2; i++) {
+      pSync[i] = ROCSHMEM_SYNC_VALUE;
+    }
+    __threadfence_system();
+  }
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int GDAContext::reduce_wg(rocshmem_team_t team, T *dest,
                                   const T *source, int nreduce) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
@@ -503,8 +710,10 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
   size_t provided_pWrk = max(nreduce / 2 + 1, ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE);
   size_t provided_pSync = ROCSHMEM_REDUCE_SYNC_SIZE;
 
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
+
   if (provided_pWrk >= direct_pWrk && provided_pSync >= direct_pSync) {
-    internal_direct_allreduce<T, Op>(dest, source, nreduce, team_obj);
+    internal_direct_allreduce_wg<T, Op>(dest, source, nreduce, team_obj, wf_info);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
       size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
@@ -516,12 +725,10 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
       int n_seg = nreduce / seg_size;
       // integer division rounding up
       int n_seg_up = (nreduce - 1) / seg_size + 1;
-      // recalculate chunk_size
-      chunk_size = seg_size / PE_size;
 
       if (n_seg > 0) {
-        internal_ring_allreduce<T, Op>(dest, source, nreduce, team_obj, n_seg,
-                                       seg_size, chunk_size);
+        internal_ring_allreduce_wg<T, Op>(dest, source, nreduce, team_obj, n_seg,
+          seg_size, chunk_size, wf_info);
       }
       if (n_seg_up > n_seg) {
         T *p_dst = (dest + (n_seg * seg_size));
@@ -530,9 +737,8 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
         int p_chunk = p_count / PE_size;
 
         if (p_chunk > 0) {
-          internal_ring_allreduce<T, Op>(p_dst, p_src, (p_chunk * PE_size),
-                                         team_obj, 1, (p_chunk * PE_size),
-                                         p_chunk);
+          internal_ring_allreduce_wg<T, Op>(p_dst, p_src, (p_chunk * PE_size),
+            team_obj, 1, (p_chunk * PE_size), p_chunk, wf_info);
         }
 
         if ((p_chunk * PE_size) < p_count) {
@@ -541,11 +747,11 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
           p_dst += (p_chunk * PE_size);
           const T *p_src2 = p_src + (p_chunk * PE_size);
 
-          internal_direct_allreduce<T, Op>(p_dst, p_src2, p_count, team_obj);
+          internal_direct_allreduce_wg<T, Op>(p_dst, p_src2, p_count, team_obj, wf_info);
         }
       }
     } else {
-      GPU_DPRINTF("Unsupported reduction size for GDA conduit.\n");
+      LOGD_WARN("Unsupported reduction size for GDA conduit.");
       return ROCSHMEM_ERROR;
     }
   }
@@ -553,31 +759,249 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
   return ROCSHMEM_SUCCESS;
 }
 
-template <typename T>
-__device__ void GDAContext::internal_put_broadcast(
-    T *dst, const T *src, int nelems, int pe_root, int pe_start,
-    int stride, int pe_size) {  // NOLINT(runtime/int)
-  if (my_pe == pe_root) {
-    int finish = pe_start + stride * pe_size;
-    for (int i = pe_start; i < finish; i += stride) {
-      if (i != my_pe) {
-        put_nbi_wg(dst, src, nelems, i);
+/*
+ * Reduce-scatter: PE r receives the element-wise reduction of
+ * source[r*nreduce .. (r+1)*nreduce - 1] across all PEs into dest[0..nreduce-1].
+ *
+ * Only workgroup 0 (is_block_zero_in_grid) runs the reduction algorithm;
+ * all workgroups participate in the per-chunk barrier_wg so the barrier
+ * call counts match.  This prevents concurrent accumulation races when
+ * multiple workgroups share the same team pSync/pWrk/dest buffers.
+ */
+template <typename T, ROCSHMEM_OP Op>
+__device__ int GDAContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
+                                             const T *source, int nreduce) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int PE_size   = team_obj->tinfo_wrt_world->size;
+  int PE_start  = team_obj->tinfo_wrt_world->pe_start;
+  int stride    = team_obj->tinfo_wrt_world->stride;
+  int team_rank = (my_pe - PE_start) / stride;
+
+  long *pSync = team_obj->reduce_pSync;
+  T    *pWrk  = reinterpret_cast<T *>(team_obj->pWrk);
+
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
+
+  int wg_id   = get_flat_block_id();
+  int wg_size = get_flat_block_size();
+
+  int pWrk_elems = (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
+  int chunk_size = max(1, pWrk_elems / PE_size);
+  int n_chunks   = (nreduce + chunk_size - 1) / chunk_size;
+  int64_t flag_val = 1;
+  int finish = PE_start + stride * PE_size;
+
+  for (int c = 0; c < n_chunks; c++) {
+    if (is_block_zero_in_grid()) {
+      int offset = c * chunk_size;
+      int count  = min(chunk_size, nreduce - offset);
+
+      // Seed dest[offset..offset+count) from my own contribution.
+      for (int j = wg_id; j < count; j += wg_size) {
+        dest[offset + j] = source[team_rank * nreduce + offset + j];
       }
+      __syncthreads();
+
+      // Send my contribution for each remote PE's output block, then signal.
+      for (int i = PE_start; i < finish; i += stride) {
+        if (i != my_pe) {
+          int remote_rank = (i - PE_start) / stride;
+          internal_putmem_wg(&pWrk[team_rank * chunk_size],
+                             reinterpret_cast<const void *>(
+                                 source + remote_rank * nreduce + offset),
+                             count * sizeof(T), i, i, wf_info);
+          if (is_thread_zero_in_block()) {
+            fence();
+            internal_putmem(&pSync[team_rank], &flag_val, sizeof(*pSync), i, i, wf_info);
+          }
+        }
+      }
+      threadfence_system();
+      __syncthreads();
+
+      // Wait for each remote PE s, then accumulate into dest.
+      for (int i = PE_start; i < finish; i += stride) {
+        if (i != my_pe) {
+          int remote_rank = (i - PE_start) / stride;
+          if (is_thread_zero_in_block()) {
+            wait_until(&pSync[remote_rank], ROCSHMEM_CMP_EQ, flag_val);
+          }
+          __syncthreads();
+          gda_compute_reduce<T, Op>(&pWrk[remote_rank * chunk_size],
+                                    dest + offset, count, wg_id, wg_size);
+          threadfence_system();
+        }
+      }
+      __syncthreads();
+
+      // Reset pSync before reuse.
+      for (int j = wg_id; j < PE_size; j += wg_size) {
+        pSync[j] = ROCSHMEM_SYNC_VALUE;
+      }
+      threadfence_system();
+      __syncthreads();
+      // Sync with workgroup 0 of other PEs
+      barrier_wg(team);
     }
   }
+
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int GDAContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
+                                               const T *source, int nreduce) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int PE_size   = team_obj->tinfo_wrt_world->size;
+  int PE_start  = team_obj->tinfo_wrt_world->pe_start;
+  int stride    = team_obj->tinfo_wrt_world->stride;
+  int team_rank = (my_pe - PE_start) / stride;
+
+  long *pSync = team_obj->reduce_pSync;
+  T    *pWrk  = reinterpret_cast<T *>(team_obj->pWrk);
+
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wave);
+
+  int wave_tid  = get_flat_block_id() % WF_SIZE;
+
+  int pWrk_elems = (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
+  int chunk_size = max(1, pWrk_elems / PE_size);
+  int n_chunks   = (nreduce + chunk_size - 1) / chunk_size;
+  int64_t flag_val = 1;
+  int finish = PE_start + stride * PE_size;
+
+  for (int c = 0; c < n_chunks; c++) {
+    int offset = c * chunk_size;
+    int count  = min(chunk_size, nreduce - offset);
+
+    // Seed dest[offset..offset+count) from my own contribution.
+    for (int j = wave_tid; j < count; j += WF_SIZE) {
+      dest[offset + j] = source[team_rank * nreduce + offset + j];
+    }
+    __builtin_amdgcn_wave_barrier();
+
+    // Send my contribution for each remote PE's output block, then signal.
+    for (int i = PE_start; i < finish; i += stride) {
+      if (i != my_pe) {
+        int remote_rank = (i - PE_start) / stride;
+        internal_putmem_wave(&pWrk[team_rank * chunk_size],
+                              reinterpret_cast<const void *>(
+                                  source + remote_rank * nreduce + offset),
+                              count * sizeof(T), i, i, wf_info);
+        if (is_thread_zero_in_wave()) {
+          fence();
+          internal_putmem(&pSync[team_rank], &flag_val, sizeof(*pSync), i, i, wf_info);
+        }
+      }
+    }
+    threadfence_system();
+    __builtin_amdgcn_wave_barrier();
+
+    // Wait for each remote PE's signal, then accumulate into dest.
+    for (int i = PE_start; i < finish; i += stride) {
+      if (i != my_pe) {
+        int remote_rank = (i - PE_start) / stride;
+        if (is_thread_zero_in_wave()) {
+          wait_until(&pSync[remote_rank], ROCSHMEM_CMP_EQ, flag_val);
+        }
+        T *src_chunk = &pWrk[remote_rank * chunk_size];
+        T *dst_chunk = dest + offset;
+        for (int j = wave_tid; j < count; j += WF_SIZE) {
+          OpWrap<Op>::Calc(src_chunk, dst_chunk, j);
+        }
+        threadfence_system();
+      }
+    }
+    __builtin_amdgcn_wave_barrier();
+
+    // Reset pSync before reuse.
+    for (int j = wave_tid; j < PE_size; j += WF_SIZE) {
+      pSync[j] = ROCSHMEM_SYNC_VALUE;
+    }
+    threadfence_system();
+    // Quiet all QPs used this chunk, then sync with wave 0 of other PEs.
+    if (is_thread_zero_in_wave()) {
+      for (int i = PE_start; i < finish; i += stride) {
+        if (i != my_pe) {
+          qps[i].quiet(wf_info);
+        }
+      }
+      sync_wave(team);
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
 }
 
 template <typename T>
-__device__ void GDAContext::internal_get_broadcast(
-  T *dst, const T *src, int nelems, int pe_root) {  // NOLINT(runtime/int)
-  if (my_pe != pe_root) {
-    get_wg(dst, src, nelems, pe_root);
+__device__ void GDAContext::internal_put_broadcast_wave(T *dst, const T *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
+  if (constmem.my_pe == pe_root) {
+    int finish = pe_start + stride * pe_size;
+    for (int i = pe_start; i < finish; i += stride) {
+      if (i != constmem.my_pe) {
+        internal_putmem_nbi_wave(dst, src, nelems * sizeof(T), i, i, wf_info);
+      }
+    }
+    memcpy_wave<MemcpyKind::Put>(dst, const_cast<T *>(src), nelems * sizeof(T));
   }
 }
 
 template <typename T>
-__device__ void GDAContext::broadcast(rocshmem_team_t team, T *dst,
-                                      const T *src, int nelems, int pe_root) {
+__device__ void GDAContext::internal_get_broadcast_wave(T *dst, const T *src,
+    int nelems, int pe_root, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
+  if (constmem.my_pe != pe_root) {
+    internal_getmem_wave(dst, src, nelems * sizeof(T), pe_root, pe_root, wf_info);
+  } else {
+    memcpy_wave<MemcpyKind::Get>(dst, const_cast<T *>(src), nelems * sizeof(T));
+  }
+}
+
+template <typename T>
+__device__ int GDAContext::broadcast_wave(rocshmem_team_t team, T *dest, 
+    const T* source, int nelems, int PE_root) {
+  if (dest == nullptr || 
+    source == nullptr || 
+    team == ROCSHMEM_TEAM_INVALID)
+    return ROCSHMEM_ERROR;
+
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int stride = team_obj->tinfo_wrt_world->stride;
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_size = team_obj->tinfo_wrt_world->size;
+  long *p_sync = team_obj->bcast_pSync;
+
+  // Passed pe_root is relative to team, convert to world root
+  int pe_root_world = team_obj->get_pe_in_world(PE_root);
+  internal_broadcast_wave<T>(dest, source, nelems, pe_root_world, pe_start, stride,
+               pe_size, p_sync);
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename T>
+__device__ void GDAContext::internal_broadcast_wave(T *dst, const T *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    long *p_sync) {  // NOLINT(runtime/int)
+
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
+  if (constmem.num_pes < 4) { //TODO: optimized for IPC
+    internal_put_broadcast_wave(dst, src, nelems, pe_root, pe_start, stride,
+      pe_size, wf_info);
+  } else {
+    internal_get_broadcast_wave(dst, src, nelems, pe_root, wf_info);
+  }
+
+  // Synchronize on completion of broadcast
+  internal_sync_wave(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
+}
+
+template <typename T>
+__device__ void GDAContext::broadcast_wg(rocshmem_team_t team, T *dst,
+    const T *src, int nelems, int pe_root) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
   int stride = team_obj->tinfo_wrt_world->stride;
@@ -587,30 +1011,14 @@ __device__ void GDAContext::broadcast(rocshmem_team_t team, T *dst,
 
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(pe_root);
-  internal_broadcast<T>(dst, src, nelems, pe_root_world, pe_start, stride,
+  internal_broadcastmem_wg(dst, src, nelems * sizeof(T), pe_root_world, pe_start, stride,
                pe_size, p_sync);
 }
 
 template <typename T>
-__device__ void GDAContext::internal_broadcast(T *dst, const T *src, int nelems,
-                                      int pe_root, int pe_start,
-                                      int stride, int pe_size,
-                                      long *p_sync) {  // NOLINT(runtime/int)
-  if (num_pes < 4) { //TODO: optimized for IPC
-    internal_put_broadcast(dst, src, nelems, pe_root, pe_start, stride,
-                           pe_size);
-  } else {
-    internal_get_broadcast(dst, src, nelems, pe_root);
-  }
-
-  // Synchronize on completion of broadcast
-  internal_sync_wg(my_pe, pe_start, stride, pe_size, p_sync);
-}
-
-template <typename T>
-__device__ void GDAContext::alltoall(rocshmem_team_t team, T *dst,
+__device__ void GDAContext::alltoall_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-  alltoall_linear_thread_puts(team, dst, src, nelems);
+  alltoallmem_linear_thread_puts_wg(team, dst, src, nelems * sizeof(T));
 }
 
 template <typename T>
@@ -631,11 +1039,9 @@ __device__ void GDAContext::alltoallv(rocshmem_team_t team,
 }
 
 template <typename T>
-__device__ void GDAContext::alltoallv_copy(rocshmem_team_t team,
-                                           T *dest, const size_t dest_nelems[],
-                                           const size_t dest_displs[],
-                                           T *source, const size_t source_nelems[],
-                                           const size_t source_displs[]) {
+__device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
+    const size_t dest_nelems[], const size_t dest_displs[], T *source,
+    const size_t source_nelems[], const size_t source_displs[]) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int pe_size = team_obj->num_pes;
   long *pSync = team_obj->alltoall_pSync;
@@ -650,29 +1056,29 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team,
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[my_pe];
-    size_t nelems = source_nelems[dest_pe] * sizeof(T);
+    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
+    size_t nelems = source_nelems[j] * sizeof(T);
     char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
 
     if (nelems != 0) {
       T* src = (T*)((char*)source + (source_displs[j] * sizeof(T)));
-      T* dst = (T*)((char*)&tmp_buf[my_pe * tmp_buf_off] + base_heap_offset);
+      T* dst = (T*)((char*)&tmp_buf[my_pe_in_team * tmp_buf_off] + base_heap_offset);
       qps[dest_pe].put_nbi_single(dst, src, nelems, false);
     }
 
-    qps[dest_pe].atomic_nofetch_single(amo_dst, 1);
+    qps[dest_pe].atomic_add_single(amo_dst, 1);
   }
 
   // wait until everyone has obtained their designated data
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(vol_ivars) != 1) { }
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
+    while (uncached_load(sync_flags) != 1) { }
 
-    pe_quiet_single(dest_pe);
+    qps[dest_pe].quiet_single();
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
   // Copy out of staging buffer
@@ -684,7 +1090,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team,
     if (nelems != 0) {
       T* dst = (T*)((char*) dest + dest_displs[j] * sizeof(T));
       T* src = (T*)((char*) &tmp_buf[j * tmp_buf_off]);
-      memcpy_wg(dst, src, nelems);
+      memcpy_wg<MemcpyKind::Put>(dst, src, nelems);
     }
   }
 
@@ -696,24 +1102,20 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team,
 }
 
 template <typename T>
-__device__ void GDAContext::alltoallv_get(rocshmem_team_t team,
-                                          T *dest, const size_t dest_nelems[],
-                                          const size_t dest_displs[],
-                                          T *source, const size_t source_nelems[],
-                                          const size_t source_displs[]) {
+__device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
+    [[maybe_unused]] const size_t dest_nelems[], const size_t dest_displs[], T *source,
+    [[maybe_unused]] const size_t source_nelems[], const size_t source_displs[]) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
-  int pe_size       = team_obj->num_pes;
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int stride = team_obj->tinfo_wrt_world->stride;
+  int pe_size = team_obj->num_pes;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
   uint64_t a2a_sn   = team_obj->alltoall_sequence_number;
   uint64_t alltoall_pSync_offset = (a2a_sn % 2) * pe_size;
-  uint64_t *tmp_buf = (uint64_t*)team_obj->pWrk;
+  uint64_t *tmp_buf = reinterpret_cast<uint64_t*>(team_obj->pWrk);
 
-  const uint64_t displs_mask = 0x0000'FFFF'FFFF'FFFF;
-  const uint64_t seq_mask = 0xFFFF;
-  const uint64_t seq_shift = 48;
+  static constexpr uint64_t displs_mask = 0x0000'FFFF'FFFF'FFFF;
+  static constexpr uint64_t seq_mask = 0xFFFF;
+  static constexpr uint64_t seq_shift = 48;
 
   int tid = get_flat_block_id();
   int step_size = min(get_flat_block_size(), WF_SIZE);
@@ -726,46 +1128,46 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team,
     uint64_t displ_bits;
 
     int dest_pe = team_obj->get_pe_in_world(j);
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[my_pe];
+    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
 
     /* Pack Ctrl Message * 16 bits seq | 48bit displ */
     seq_bits = (seq_mask & (a2a_sn + 1)) << seq_shift;
-    displ_bits = (displs_mask & source_displs[dest_pe]);
+    displ_bits = (displs_mask & source_displs[j]);
     uint64_t ctrl_msg = seq_bits | displ_bits;
 
     /* Prepare Ctrl Message */
     src = (uint64_t*)&ctrl_msg;
-    dst = (uint64_t*)((char*)&tmp_buf[my_pe] + base_heap_offset);
+    dst = (uint64_t*)((char*)&tmp_buf[my_pe_in_team] + base_heap_offset);
 
     qps[dest_pe].put_nbi_single(dst, src, sizeof(uint64_t), true);
 
     /* Wait for Ctrl Message */
     uint64_t ctrl_value;
-    volatile uint64_t *vol_ctrl = &tmp_buf[dest_pe];
+    uint64_t *vol_ctrl = &tmp_buf[j];
 
     do {
       ctrl_value = uncached_load(vol_ctrl);
       seq_bits = (ctrl_value >> seq_shift) & seq_mask;
       displ_bits = ctrl_value & displs_mask;
-    } while (seq_bits != (a2a_sn + 1));
+    } while (seq_bits != ((a2a_sn + 1) & seq_mask));
 
     /* Get data */
-    size_t nelems = dest_nelems[dest_pe] * sizeof(T);
-    src = (uint64_t*)((char*)source + (displ_bits * sizeof(T)) + base_heap_offset);
+    size_t nelems = dest_nelems[j] * sizeof(T);
+    src = (uint64_t*)((char*)source + (displ_bits * sizeof(T)));
     dst = (uint64_t*)((char*)dest + (dest_displs[j] * sizeof(T)));
 
     qps[dest_pe].get_nbi_single(dst, src, nelems, true);
 
     /* Put Completion */
     char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
-    qps[dest_pe].atomic_nofetch_single(amo_dst, 1);
+    qps[dest_pe].atomic_add_single(amo_dst, 1);
 
-    volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(vol_ivars) != 1) { }
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
+    while (uncached_load(sync_flags) != 1) { }
 
-    pe_quiet_single(dest_pe);
+    qps[dest_pe].quiet_single();
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
   if (is_thread_zero_in_block()) {
@@ -776,7 +1178,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team,
 }
 
 template <typename T>
-__device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
+__device__ void GDAContext::alltoall_linear_wg(rocshmem_team_t team, T *dst,
                                             const T *src, int nelems) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
@@ -789,93 +1191,49 @@ __device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
   int wf_id = get_flat_block_id() / WF_SIZE;
   int wf_count = (int) ceil((double)get_flat_block_size() / (double)WF_SIZE);
 
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
   // Have each PE put their designated data to the other PEs
   for (int j = wf_id; j < pe_size; j+= wf_count) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    put_nbi_wave(&dst[my_pe_in_team * nelems], &src[j * nelems], nelems, dest_pe);
+    internal_putmem_nbi_wave(&dst[my_pe_in_team * nelems], &src[j * nelems],
+      nelems * sizeof(T), dest_pe, dest_pe, wf_info);
   }
 
   for (int j = wf_id; j < pe_size; j+= wf_count) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    pe_quiet(dest_pe);
+    qps[dest_pe].quiet(wf_info);
   }
 
   // wait until everyone has obtained their designated data
-  internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync);
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
 }
 
 template <typename T>
-__device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team, T *dst,
-                                                        const T *src, int nelems) {
-  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+__device__ int GDAContext::alltoall_wave(rocshmem_team_t team, 
+                          T* dest, const T* source, int nelems) {
+  if (dest == nullptr || source == nullptr)
+    return ROCSHMEM_ERROR;
 
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->num_pes;
-  int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
-  int my_pe_in_team = team_obj->my_pe;
-  uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
+  alltoallmem_linear_thread_puts_wave(team, dest, source, nelems * sizeof(T));
 
-  int tid = get_flat_block_id();
-  int step_size = min(get_flat_block_size(), WF_SIZE);
-
-  // Have each PE put their designated data to the other PEs
-  for (int j = tid; j < pe_size; j+= step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[my_pe];
-    qps[dest_pe].put_nbi_single(reinterpret_cast<char*>(&dst[my_pe_in_team * nelems]) + base_heap_offset,
-                                &src[j * nelems], nelems * sizeof(T), false);
-    qps[dest_pe].atomic_nofetch_single(reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) + base_heap_offset,
-                                       1);
-  }
-
-  // wait until everyone has obtained their designated data
-  for (int j = tid; j < pe_size; j+= step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-
-    volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(vol_ivars) != 1) { }
-
-    pe_quiet_single(dest_pe);
-
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
-  }
-
-  if (is_thread_zero_in_block()) {
-    team_obj->alltoall_sequence_number++;
-  }
-
-  __syncthreads();
+  return ROCSHMEM_SUCCESS;
 }
 
 template <typename T>
-__device__ void GDAContext::fcollect(rocshmem_team_t team, T *dst,
+__device__ void GDAContext::fcollect_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-  fcollect_linear(team, dst, src, nelems);
+  fcollectmem_linear_wg(team, dst, src, nelems * sizeof(T));
 }
 
 template <typename T>
-__device__ void GDAContext::fcollect_linear(rocshmem_team_t team, T *dst,
-                                            const T *src, int nelems) {
-  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+__device__ int GDAContext::fcollect_wave(rocshmem_team_t team, T *dst,
+                                     const T *src, int nelems) {
+  if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
+    return ROCSHMEM_ERROR;
 
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->num_pes;
-  int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
-  int my_pe_in_team = team_obj->my_pe;
+  fcollectmem_linear_wave(team, dst, src, nelems * sizeof(T));
 
-  // Have each PE put their designated data to the other PEs
-  for (int j = 0; j < pe_size; j++) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-    put_nbi_wg(&dst[my_pe_in_team * nelems], src, nelems, dest_pe);
-  }
-
-  if (is_thread_zero_in_block()) {
-    quiet();
-  }
-  // wait until everyone has obtained their designated data
-  internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync);
+  return ROCSHMEM_SUCCESS;
 }
 
 // Block/wave functions
@@ -938,6 +1296,374 @@ GDA_CONTEXT_PUT_SIGNAL_DEF()
 GDA_CONTEXT_PUT_SIGNAL_DEF(_wg)
 GDA_CONTEXT_PUT_SIGNAL_DEF(_wave)
 
+// Internal functions used by collective and signal operations
+template <typename T>
+__device__ void GDAContext::internal_amo_add(void *dst, T value, int pe,
+    int qp_index, ActiveWFInfo &wf_info) {
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_add not implemented for non-64bit types"); }//TODO:support for non-uint64t
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
+  bool need_turn {true};
+  uint64_t turns = __ballot(need_turn);
+  while (turns) {
+    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
+    int pe_turn = __shfl(pe, lane);
+    if (pe_turn == pe) {
+      qps[qp_index].atomic_add(base_heap[pe] + L_offset, value, wf_info);
+      need_turn = false;
+    }
+    turns = __ballot(need_turn);
+  }
+}
+
+template <typename T>
+__device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe,
+    int qp_index, ActiveWFInfo &wf_info) {
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fadd not implemented for non-64bit types"); }//TODO:support for non-uint64t
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
+  T ret_val = 0;
+  bool need_turn {true};
+  uint64_t turns = __ballot(need_turn);
+  while (turns) {
+    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
+    int pe_turn = __shfl(pe, lane);
+    if (pe_turn == pe) {
+      ret_val =  qps[qp_index].atomic_fetch_add(base_heap[pe] + L_offset, value, wf_info);
+      need_turn = false;
+    }
+    turns = __ballot(need_turn);
+  }
+  return ret_val;
+}
+
+template <typename T>
+__device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
+    int qp_index, ActiveWFInfo &wf_info) {
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_set not implemented for non-64bit types"); }//TODO:support for non-uint64t
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
+  bool need_turn {true};
+  uint64_t turns = __ballot(need_turn);
+  T ret_val;
+  T cond = 0;
+  while (turns) {
+    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
+    int pe_turn = __shfl(pe, lane);
+    if (pe_turn == pe) {
+      /**
+       * Guess that the remote memory is zero by setting condition to zero.
+       * The compare-and-swap loop will execute at least twice if wrong.
+       * It may run additional times if contention on memory location.
+       */
+      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
+             base_heap[pe] + L_offset, value, cond, wf_info)) != cond) {
+        cond = ret_val;
+      }
+      need_turn = false;
+    }
+    turns = __ballot(need_turn);
+  }
+  return ret_val;
+}
+
+/******************************************************************************
+ ****************************** INLINE FUNCTIONS ******************************
+ *****************************************************************************/
+
+/**
+ * @brief Get the Queue Pair index for a given PE based on a atomic counter
+ *        This ensures even distribution of requests across multiple QPs
+ *        allocated per PE.
+ * @param pe The target PE
+ * @return The Queue Pair index
+ *
+ * Explanation of QP indexing scheme:
+ *  num_qps_per_pe = 4
+ *  num_pes        = 3
+ *
+ *  Layout of QPs per PE:
+ *
+ *             PE0          PE1          PE2
+ *           ───────      ───────      ───────
+ *  QP0  ─> [ QP0,0 ]    [ QP0,1 ]    [ QP0,2 ]
+ *  QP1  ─> [ QP1,0 ]    [ QP1,1 ]    [ QP1,2 ]
+ *  QP2  ─> [ QP2,0 ]    [ QP2,1 ]  **[ QP2,2 ]** <-- highlighted (3rd QP of PE2)
+ *  QP3  ─> [ QP3,0 ]    [ QP3,1 ]    [ QP3,2 ]
+ *
+ *  Legend:
+ *    - num_qps_per_pe = 4  →  Four Queue Pairs per PE
+ *    - num_pes = 3         →  Three Processing Elements (PE0–PE2)
+ *    - QP[i,j]             →  i-th QP of PE j
+ *    - **[ QP2,2 ]**       →  The 3rd QP (QP index 2) of PE2
+ */
+__device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
+    ActiveWFInfo wf_info) {
+
+  uint32_t qp_index   {0};
+
+  if(wf_info.pe_group_logical_lane_id == 0) {
+    // Only the leader lane updates the counter (Does it require atomics?)
+    // uint32_t local_qp_counter = __hip_atomic_fetch_add(&qp_counter[pe], 1,
+    //                                        __ATOMIC_RELAXED,
+    //                                        __HIP_MEMORY_SCOPE_AGENT);
+    // local_qp_counter %= num_qps_per_pe;
+    // qp_index = (local_qp_counter * num_pes) + pe;
+    qp_index = (qp_counter[pe]++ % num_qps_per_pe) * constmem.num_pes + pe;
+  }
+
+  // Broadcast the qp_index value to other lanes in the wavefront
+  // that are targeting the same PE
+  qp_index = __shfl_sync(wf_info.pe_group_mask, qp_index, wf_info.pe_group_first_phys_lane_id);
+
+  return qp_index;
+}
+
+/******************************************************************************
+ **************** TILE API STUB IMPLEMENTATIONS (NOT IMPLEMENTED) *************
+ *****************************************************************************/
+
+// RMA PUT operations - Type-erased interface
+__device__ inline int GDAContext::tile_put([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                    [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                    [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                    [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                    [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_put_wave([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                         [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                         [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                         [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                         [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_put_wg([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                       [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                       [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                       [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                       [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+// RMA GET operations - Type-erased interface
+__device__ inline int GDAContext::tile_get([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                    [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                    [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                    [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                    [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_get_wave([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                         [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                         [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                         [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                         [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_get_wg([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                       [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                       [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                       [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                       [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+// Allgather operations - Type-erased interface
+__device__ inline int GDAContext::tile_allgather([[maybe_unused]] rocshmem_team_t team,
+                                          [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                          [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                          [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                          [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                          [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_allgather_wave([[maybe_unused]] rocshmem_team_t team,
+                                               [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                               [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                               [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                               [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                               [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_allgather_wg([[maybe_unused]] rocshmem_team_t team,
+                                             [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                             [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                             [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                             [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                             [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+// Broadcast operations - Type-erased interface
+__device__ inline int GDAContext::tile_broadcast([[maybe_unused]] rocshmem_team_t team,
+                                          [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                          [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                          [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                          [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                          [[maybe_unused]] int pe_root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_broadcast_wave([[maybe_unused]] rocshmem_team_t team,
+                                               [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                               [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                               [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                               [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                               [[maybe_unused]] int pe_root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_broadcast_wg([[maybe_unused]] rocshmem_team_t team,
+                                             [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                             [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                             [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                             [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                             [[maybe_unused]] int pe_root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+// SUM Reduction operations - Type-erased interface
+__device__ inline int GDAContext::tile_sum_reduce([[maybe_unused]] rocshmem_team_t team,
+                                           [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                           [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                           [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                           [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                           [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_sum_reduce_wave([[maybe_unused]] rocshmem_team_t team,
+                                                [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                                [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                                [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                                [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                                [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_sum_reduce_wg([[maybe_unused]] rocshmem_team_t team,
+                                              [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                              [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                              [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                              [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                              [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+// MAX Reduction operations - Type-erased interface
+__device__ inline int GDAContext::tile_max_reduce([[maybe_unused]] rocshmem_team_t team,
+                                                   [[maybe_unused]] void* dst_data,
+                                                   [[maybe_unused]] const void* src_data,
+                                                   [[maybe_unused]] const size_t* dst_strides,
+                                                   [[maybe_unused]] const size_t* src_strides,
+                                                   [[maybe_unused]] const size_t* start_coord,
+                                                   [[maybe_unused]] const size_t* boundary,
+                                                   [[maybe_unused]] int ndim,
+                                                   [[maybe_unused]] size_t element_size,
+                                                   [[maybe_unused]] int root,
+                                                   [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_max_reduce_wave([[maybe_unused]] rocshmem_team_t team,
+                                                        [[maybe_unused]] void* dst_data,
+                                                        [[maybe_unused]] const void* src_data,
+                                                        [[maybe_unused]] const size_t* dst_strides,
+                                                        [[maybe_unused]] const size_t* src_strides,
+                                                        [[maybe_unused]] const size_t* start_coord,
+                                                        [[maybe_unused]] const size_t* boundary,
+                                                        [[maybe_unused]] int ndim,
+                                                        [[maybe_unused]] size_t element_size,
+                                                        [[maybe_unused]] int root,
+                                                        [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_max_reduce_wg([[maybe_unused]] rocshmem_team_t team,
+                                                      [[maybe_unused]] void* dst_data,
+                                                      [[maybe_unused]] const void* src_data,
+                                                      [[maybe_unused]] const size_t* dst_strides,
+                                                      [[maybe_unused]] const size_t* src_strides,
+                                                      [[maybe_unused]] const size_t* start_coord,
+                                                      [[maybe_unused]] const size_t* boundary,
+                                                      [[maybe_unused]] int ndim,
+                                                      [[maybe_unused]] size_t element_size,
+                                                      [[maybe_unused]] int root,
+                                                      [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+// MIN Reduction operations - Type-erased interface
+__device__ inline int GDAContext::tile_min_reduce([[maybe_unused]] rocshmem_team_t team,
+                                                   [[maybe_unused]] void* dst_data,
+                                                   [[maybe_unused]] const void* src_data,
+                                                   [[maybe_unused]] const size_t* dst_strides,
+                                                   [[maybe_unused]] const size_t* src_strides,
+                                                   [[maybe_unused]] const size_t* start_coord,
+                                                   [[maybe_unused]] const size_t* boundary,
+                                                   [[maybe_unused]] int ndim,
+                                                   [[maybe_unused]] size_t element_size,
+                                                   [[maybe_unused]] int root,
+                                                   [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_min_reduce_wave([[maybe_unused]] rocshmem_team_t team,
+                                                        [[maybe_unused]] void* dst_data,
+                                                        [[maybe_unused]] const void* src_data,
+                                                        [[maybe_unused]] const size_t* dst_strides,
+                                                        [[maybe_unused]] const size_t* src_strides,
+                                                        [[maybe_unused]] const size_t* start_coord,
+                                                        [[maybe_unused]] const size_t* boundary,
+                                                        [[maybe_unused]] int ndim,
+                                                        [[maybe_unused]] size_t element_size,
+                                                        [[maybe_unused]] int root,
+                                                        [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_min_reduce_wg([[maybe_unused]] rocshmem_team_t team,
+                                                      [[maybe_unused]] void* dst_data,
+                                                      [[maybe_unused]] const void* src_data,
+                                                      [[maybe_unused]] const size_t* dst_strides,
+                                                      [[maybe_unused]] const size_t* src_strides,
+                                                      [[maybe_unused]] const size_t* start_coord,
+                                                      [[maybe_unused]] const size_t* boundary,
+                                                      [[maybe_unused]] int ndim,
+                                                      [[maybe_unused]] size_t element_size,
+                                                      [[maybe_unused]] int root,
+                                                      [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+// Rooted SUM Reduction operations
+// Rooted MAX Reduction operations
+// Rooted MIN Reduction operations
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_GDA_CONTEXT_TMPL_DEVICE_HPP_

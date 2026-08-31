@@ -73,7 +73,16 @@ static void validateMemcpyNode1DArray(bool peerAccess,
                                     numBytes, hipMemcpyDeviceToHost));
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  hipError_t graphInstStatus = hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0);
+  if (peerAccess && graphInstStatus == hipErrorNotSupported) {
+    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipStreamDestroy(streamForGraph));
+    HIP_CHECK(hipFree(devArray1));
+    HIP_CHECK(hipFree(devArray2));
+    SKIP("Multi-device graph instantiation not supported (hipErrorNotSupported)");
+  }
+  HIP_CHECK(graphInstStatus);
   HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
   HIP_CHECK(hipStreamSynchronize(streamForGraph));
 
@@ -102,7 +111,7 @@ static void validateMemcpyNode1DArray(bool peerAccess,
  * For Peer device test: Memory allocations happen on device(0) and memcpy operations
  * are performed from device(1).
  */
-TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Functional) {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Functional) {
   SECTION("Memcpy with 1D array on default device") { validateMemcpyNode1DArray(false); }
   SECTION("Memcpy with 1D array using DeviceToDeviceNoCU") {
     validateMemcpyNode1DArray(false, hipMemcpyDeviceToDeviceNoCU);
@@ -115,7 +124,7 @@ TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Functional) {
     }
 
     if (!peerAccess) {
-      WARN("Skipping test as peer device access is not found!");
+      WARN("Skipping peer memcpy section: peer access is not available between devices.");
       return;
     }
     validateMemcpyNode1DArray(true);
@@ -126,7 +135,7 @@ TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Functional) {
 /**
  * Negative Test for API hipGraphAddMemcpyNode1D
  */
-TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Negative) {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Negative) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   int *A_d, *A_h;
@@ -192,7 +201,7 @@ TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Negative) {
  * hipGraphAddMemcpyNode1D with data transfer kind hipMemcpyHostToHost.
  * Validate the output.
  */
-TEST_CASE(Unit_hipGraphAddMemcpyNode1D_HostToHost) {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_HostToHost) {
   constexpr size_t size = 1024;
   size_t numBytes{size * sizeof(int)};
 

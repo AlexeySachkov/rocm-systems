@@ -60,9 +60,7 @@ template <typename T> __global__ void stdheader(T a, bool* passed) {
  * ------------------------
  *  - ROCM_VERSION >= 7.0
  */
-TEST_CASE(Unit_hiprtc_stdheaders) {
-  HipTest::HIP_SKIP_TEST("Test disabled due to incorrect ROCm version");
-  return;
+HIP_TEST_CASE(Unit_hiprtc_stdheaders) {
 
   using namespace std;
   hiprtcProgram prog;
@@ -120,6 +118,8 @@ TEST_CASE(Unit_hiprtc_stdheaders) {
   HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config));
 
   HIP_CHECK(hipMemcpy(hResult.get(), dResult, sizeof(bool), hipMemcpyDeviceToHost));
+
+  HIP_CHECK(hipFree(dResult));
 
   HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));

@@ -30,7 +30,7 @@ Functional:
 /* This test covers the negative scenarios of
    hipGraphClone API */
 
-TEST_CASE(Unit_hipGraphClone_Negative) {
+HIP_TEST_CASE(Unit_hipGraphClone_Negative) {
   SECTION("Passing nullptr to Cloned graph") {
     hipGraph_t graph;
     HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -216,7 +216,7 @@ This testcase verifies following scenarios
    validate the result of the cloned graph
 3. Device context change for cloned graph
 */
-TEST_CASE(Unit_hipGraphClone_Functional) {
+HIP_TEST_CASE(Unit_hipGraphClone_Functional) {
   SECTION("hipGraphClone Basic Functionality") { hipGraphClone_Func(); }
   SECTION("hipGraphClone Modify Original graph") { hipGraphClone_Func(true); }
 
@@ -229,10 +229,12 @@ TEST_CASE(Unit_hipGraphClone_Functional) {
       if (canAccessPeer) {
         hipGraphClone_DeviceContextChange();
       } else {
-        SUCCEED("Machine does not seem to have P2P");
+        WARN("Skipping device context change section: peer access is not available between devices.");
+        return;
       }
     } else {
-      SUCCEED("skipped the testcase as no of devices is less than 2");
+      WARN("Skipping device context change section: fewer than two GPUs.");
+      return;
     }
   }
 }
@@ -245,7 +247,7 @@ hipGraphClone is failing in CUDA in multi threaded
 scenario so excluded for nvidia
 */
 #if HT_AMD
-TEST_CASE(Unit_hipGraphClone_MultiThreaded) {
+HIP_TEST_CASE(Unit_hipGraphClone_MultiThreaded) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -262,21 +264,18 @@ TEST_CASE(Unit_hipGraphClone_MultiThreaded) {
   auto lambdaFunc = [&]() {
     hipGraph_t clonedgraph;
     hipGraphExec_t graphExec;
-    HIP_CHECK(hipGraphClone(&clonedgraph, graph));
+    HIP_CHECK_THREAD(hipGraphClone(&clonedgraph, graph));
     // Instantiate and launch the cloned graph
-    HIP_CHECK(hipGraphInstantiate(&graphExec, clonedgraph, nullptr, nullptr, 0));
-    HIP_CHECK(hipGraphLaunch(graphExec, 0));
-    HIP_CHECK(hipStreamSynchronize(0));
+    HIP_CHECK_THREAD(hipGraphInstantiate(&graphExec, clonedgraph, nullptr, nullptr, 0));
+    HIP_CHECK_THREAD(hipGraphLaunch(graphExec, 0));
+    HIP_CHECK_THREAD(hipStreamSynchronize(0));
 
     for (size_t i = 0; i < N; i++) {
-      if (A_h[i] != B_h[i]) {
-        INFO("Validation failed A_h[i] " << A_h[i] << " B_h[i] " << B_h[i]);
-        REQUIRE(false);
-      }
+      REQUIRE_THREAD(A_h[i] == B_h[i]);
     }
 
-    HIP_CHECK(hipGraphExecDestroy(graphExec));
-    HIP_CHECK(hipGraphDestroy(clonedgraph));
+    HIP_CHECK_THREAD(hipGraphExecDestroy(graphExec));
+    HIP_CHECK_THREAD(hipGraphDestroy(clonedgraph));
   };
   for (int i = 0; i < NUM_THREADS; i++) {
     std::thread t(lambdaFunc);
@@ -285,6 +284,7 @@ TEST_CASE(Unit_hipGraphClone_MultiThreaded) {
   for (auto& t : threads) {
     t.join();
   }
+  HIP_CHECK_THREAD_FINALIZE();
   HipTest::freeArrays<int>(A_d, nullptr, nullptr, A_h, B_h, nullptr, false);
   HIP_CHECK(hipGraphDestroy(graph));
 }

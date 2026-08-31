@@ -9,7 +9,6 @@
 #include <hip_test_checkers.hh>
 
 #define NUMBER_OF_THREADS 10
-static bool thread_results[NUMBER_OF_THREADS];
 
 /**
  * @addtogroup hipStreamGetDevice hipStreamGetDevice
@@ -36,7 +35,7 @@ static bool thread_results[NUMBER_OF_THREADS];
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Unit_hipStreamGetDevice_Negative) {
+HIP_TEST_CASE(Unit_hipStreamGetDevice_Negative) {
   hipStream_t stream;
 
   HIP_CHECK(hipStreamCreate(&stream));
@@ -61,7 +60,7 @@ TEST_CASE(Unit_hipStreamGetDevice_Negative) {
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Unit_hipStreamGetDevice_Usecase) {
+HIP_TEST_CASE(Unit_hipStreamGetDevice_Usecase) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   REQUIRE(device_count != 0);
@@ -121,41 +120,32 @@ TEST_CASE(Unit_hipStreamGetDevice_Usecase) {
  *    - HIP_VERSION >= 5.6
  */
 
-static bool validateStreamGetDevice() {
+static void validateStreamGetDevice() {
   int gpu = 0;
   hipDevice_t device_from_stream;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipStreamGetDevice(stream, &device_from_stream));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK_THREAD(hipStreamCreate(&stream));
+  HIP_CHECK_THREAD(hipStreamGetDevice(stream, &device_from_stream));
+  HIP_CHECK_THREAD(hipStreamDestroy(stream));
 
-  REQUIRE(device_from_stream == gpu);
-  return true;
+  REQUIRE_THREAD(device_from_stream == gpu);
 }
 
-static void thread_Test(int threadNum) { thread_results[threadNum] = validateStreamGetDevice(); }
-
-static bool test_hipStreamGetDevice_MThread() {
+static void test_hipStreamGetDevice_MThread() {
   std::vector<std::thread> tests;
 
   // Spawn the test threads
   for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    thread_results[idx] = false;
-    tests.push_back(std::thread(thread_Test, idx));
+    tests.push_back(std::thread(validateStreamGetDevice));
   }
   // Wait for all threads to complete
   for (std::thread& t : tests) {
     t.join();
   }
-  // Wait for thread
-  bool status = true;
-  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    status = status & thread_results[idx];
-  }
-  return status;
+  HIP_CHECK_THREAD_FINALIZE();
 }
 
-TEST_CASE(Unit_hipStreamGetDevice_MThread) { REQUIRE(true == test_hipStreamGetDevice_MThread()); }
+HIP_TEST_CASE(Unit_hipStreamGetDevice_MThread) { test_hipStreamGetDevice_MThread(); }
 
 /**
  * Test Description
@@ -173,13 +163,12 @@ TEST_CASE(Unit_hipStreamGetDevice_MThread) { REQUIRE(true == test_hipStreamGetDe
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Unit_hipStreamGetDevice_SetDiffDevice) {
+HIP_TEST_CASE(Unit_hipStreamGetDevice_SetDiffDevice) {
   hipDevice_t device_from_stream;
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   for (int i = 0; i < device_count; ++i) {
     HIP_CHECK(hipSetDevice(i));
@@ -212,7 +201,7 @@ TEST_CASE(Unit_hipStreamGetDevice_SetDiffDevice) {
  *      Test to be run only on AMD machine as it's failing in CUDA.
  */
 #if HT_AMD
-TEST_CASE(Unit_hipStreamGetDevice_NullStream) {
+HIP_TEST_CASE(Unit_hipStreamGetDevice_NullStream) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   REQUIRE(device_count != 0);

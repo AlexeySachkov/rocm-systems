@@ -28,16 +28,6 @@ static constexpr auto LEN{1024};
 static constexpr auto LARGE_CHUNK_LEN{128 * LEN};
 static constexpr auto SMALL_CHUNK_LEN{8 * LEN};
 
-#if HT_AMD
-#define TEST_SKIP(arch, msg)                                                                       \
-  if (std::string::npos == arch.find("xnack+")) {                                                  \
-    HipTest::HIP_SKIP_TEST(msg);                                                                   \
-    return;                                                                                        \
-  }
-#else
-#define TEST_SKIP(arch, msg)
-#endif
-
 template <typename T> __global__ void SetVal(T* in, T val) {
   int i = threadIdx.x + blockIdx.x * blockDim.x;
   in[i] = val;
@@ -46,6 +36,21 @@ template <typename T> __global__ void Inc(T* Ad) {
   int i = threadIdx.x + blockIdx.x * blockDim.x;
   Ad[i]++;
 }
+
+#if HT_AMD
+__global__ void AtomicFAddKernelKernel(float* data, size_t n) {
+  size_t i = blockDim.x * blockIdx.x + threadIdx.x;
+  if (i < n) {
+#if __has_builtin(__builtin_amdgcn_global_atomic_fadd_f32)
+    __builtin_amdgcn_global_atomic_fadd_f32(data, 1.0f);
+#else
+    if (i == 0) {
+      *data = -1.0;
+    }
+#endif
+  }
+}
+#endif
 
 template <typename T>
 void doMemCopy(size_t numElements, int offset, T* A, T* Bh, T* Bd, bool internalRegister) {
@@ -61,8 +66,8 @@ void doMemCopy(size_t numElements, int offset, T* A, T* Bh, T* Bd, bool internal
 
   // Reset
   for (size_t i = 0; i < numElements; i++) {
-    A[i] = static_cast<float>(i);
-    Bh[i] = 0.0f;
+    A[i] = static_cast<T>(i);
+    Bh[i] = static_cast<T>(0);
   }
 
   HIP_CHECK(hipMemset(Bd, memsetval, sizeBytes));
@@ -84,7 +89,7 @@ void doMemCopy(size_t numElements, int offset, T* A, T* Bh, T* Bd, bool internal
  *    - This testcase verifies the hipHostRegister API by
  * 1. Allocating the memory using malloc
  * 2. hipHostRegister that variable
- * 3. Getting the corresponding device pointer of the registered varible
+ * 3. Getting the corresponding device pointer of the registered variable
  * 4. Launching kernel and access the device pointer variable
  * 5. performing hipMemset on the device pointer variable
  * Test source
@@ -94,7 +99,7 @@ void doMemCopy(size_t numElements, int offset, T* A, T* Bh, T* Bd, bool internal
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipHostRegister_ReferenceFromKernelandhipMemset) {
+HIP_TEST_CASE(Unit_hipHostRegister_ReferenceFromKernelandhipMemset) {
   size_t sizeBytes{LEN * sizeof(int)};
   int *A, **Ad;
   int num_devices = 0;
@@ -160,7 +165,7 @@ TEST_CASE(Unit_hipHostRegister_ReferenceFromKernelandhipMemset) {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipHostRegister_DirectReferenceFromKernel) {
+HIP_TEST_CASE(Unit_hipHostRegister_DirectReferenceFromKernel) {
   auto flags = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped);
   size_t sizeBytes{LEN * sizeof(int)};
   int* A;
@@ -198,7 +203,7 @@ TEST_CASE(Unit_hipHostRegister_DirectReferenceFromKernel) {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipHostRegister_DirectReferenceMultGpu) {
+HIP_TEST_CASE(Unit_hipHostRegister_DirectReferenceMultGpu) {
   // 1 refers to doing hipHostRegister once for all devices
   // 0 refers to doing hipHostRegister for each device
   auto register_once = GENERATE(0, 1);
@@ -253,7 +258,7 @@ TEST_CASE(Unit_hipHostRegister_DirectReferenceMultGpu) {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipHostRegister_SameChunkRepeat) {
+HIP_TEST_CASE(Unit_hipHostRegister_SameChunkRepeat) {
   size_t sizeBytes{LEN * sizeof(uint8_t)};
   uint8_t* A;
   A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
@@ -290,7 +295,7 @@ TEST_CASE(Unit_hipHostRegister_SameChunkRepeat) {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipHostRegister_Chunks_SingleAttempt) {
+HIP_TEST_CASE(Unit_hipHostRegister_Chunks_SingleAttempt) {
   size_t sizeBytes{LARGE_CHUNK_LEN * sizeof(uint8_t)};
   size_t sizeBytesChunk{SMALL_CHUNK_LEN * sizeof(uint8_t)};
   uint8_t* A;
@@ -336,7 +341,7 @@ TEST_CASE(Unit_hipHostRegister_Chunks_SingleAttempt) {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipHostRegister_Chunks_RoundRobin) {
+HIP_TEST_CASE(Unit_hipHostRegister_Chunks_RoundRobin) {
   size_t sizeBytes{LARGE_CHUNK_LEN * sizeof(int)};
   size_t sizeBytesChunk{SMALL_CHUNK_LEN * sizeof(int)};
   int* A;
@@ -374,7 +379,7 @@ TEST_CASE(Unit_hipHostRegister_Chunks_RoundRobin) {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipHostRegister_Perform_hipMemset) {
+HIP_TEST_CASE(Unit_hipHostRegister_Perform_hipMemset) {
   size_t sizeBytes{LEN * sizeof(uint8_t)};
   uint8_t* A;
   uint8_t* dPtr = nullptr;
@@ -408,7 +413,7 @@ TEST_CASE(Unit_hipHostRegister_Perform_hipMemset) {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipHostRegister_Perform_hipMemcpy) {
+HIP_TEST_CASE(Unit_hipHostRegister_Perform_hipMemcpy) {
   size_t sizeBytes{LEN * sizeof(uint8_t)};
   uint8_t *A, *B, *dPtr;
   A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
@@ -448,7 +453,7 @@ TEST_CASE(Unit_hipHostRegister_Perform_hipMemcpy) {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipHostRegister_AsyncApis) {
+HIP_TEST_CASE(Unit_hipHostRegister_AsyncApis) {
   size_t sizeBytes{LEN * sizeof(uint32_t)};
   uint32_t *A, *B, *dPtr;
   A = reinterpret_cast<uint32_t*>(malloc(sizeBytes));
@@ -490,7 +495,7 @@ TEST_CASE(Unit_hipHostRegister_AsyncApis) {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipHostRegister_Graphs) {
+HIP_TEST_CASE(Unit_hipHostRegister_Graphs) {
   size_t sizeBytes{LEN * sizeof(uint32_t)};
   uint32_t *A, *B, *dPtr;
   A = reinterpret_cast<uint32_t*>(malloc(sizeBytes));
@@ -558,13 +563,11 @@ TEST_CASE(Unit_hipHostRegister_Graphs) {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipHostRegister_MemAdvise_SetGet) {
+HIP_TEST_CASE(Unit_hipHostRegister_MemAdvise_SetGet) {
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   if (prop.concurrentManagedAccess == 0) {
-    const char* msg = "Concurrent access not supported. Skipping test";
-    HipTest::HIP_SKIP_TEST(msg);
-    return;
+    HIP_SKIP_TEST("concurrent managed access is not supported for this test.");
   }
   int numDevices = HipTest::getDeviceCount();
   size_t sizeBytes{LEN * sizeof(uint8_t)};
@@ -627,7 +630,7 @@ TEST_CASE(Unit_hipHostRegister_MemAdvise_SetGet) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipHostRegister_Memcpy) {
+HIP_TEST_CASE(Unit_hipHostRegister_Memcpy) {
   // 1 refers to hipHostRegister
   // 0 refers to malloc
   auto mem_type = GENERATE(0, 1);
@@ -642,14 +645,15 @@ TEST_CASE(Unit_hipHostRegister_Memcpy) {
   Bh = reinterpret_cast<int*>(malloc(sizeBytes));
   HIP_CHECK(hipMalloc(&Bd, sizeBytes));
 
-  REQUIRE(LEN > OFFSET);
+  const size_t offset = isQuickLevel() ? 8 : OFFSET;
+  REQUIRE(LEN > offset);
   if (mem_type) {
-    for (size_t i = 0; i < OFFSET; i++) {
+    for (size_t i = 0; i < offset; i++) {
       doMemCopy<int>(LEN, i, A, Bh, Bd, true /*internalRegister*/);
     }
   } else {
     HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
-    for (size_t i = 0; i < OFFSET; i++) {
+    for (size_t i = 0; i < offset; i++) {
       doMemCopy<int>(LEN, i, A, Bh, Bd, false /*internalRegister*/);
     }
     HIP_CHECK(hipHostUnregister(A));
@@ -671,7 +675,7 @@ TEST_CASE(Unit_hipHostRegister_Memcpy) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipHostRegister_Flags) {
+HIP_TEST_CASE(Unit_hipHostRegister_Flags) {
   size_t sizeBytes = 1 * sizeof(int);
   int* hostPtr = reinterpret_cast<int*>(malloc(sizeBytes));
 
@@ -681,16 +685,14 @@ TEST_CASE(Unit_hipHostRegister_Flags) {
     bool valid;
   };
 
-  /* EXSWCPHIPT-29 - 0x08 is hipHostRegisterReadOnly which currently doesn't
-  have a definition in the headers */
   /* hipHostRegisterIoMemory is a valid flag but requires access to I/O mapped
   memory to be tested */
   FlagType flags = GENERATE(
       FlagType{hipHostRegisterDefault, true}, FlagType{hipHostRegisterPortable, true},
-      FlagType{0x08, true}, FlagType{hipHostRegisterPortable | hipHostRegisterMapped, true},
-      FlagType{hipHostRegisterPortable | hipHostRegisterMapped | 0x08, true},
+      FlagType{hipHostRegisterReadOnly, true}, FlagType{hipHostRegisterPortable | hipHostRegisterMapped, true},
+      FlagType{hipHostRegisterPortable | hipHostRegisterMapped | hipHostRegisterReadOnly, true},
 #if (HT_AMD == 1) && (HT_LINUX == 1)
-      FlagType{hipHostRegisterIoMemory, true},
+      FlagType{hipHostRegisterIoMemory, true}, FlagType{hipExtHostRegisterCoarseGrained, true},
       FlagType{hipExtHostRegisterUncached, true},
       FlagType{hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached, true},
 #endif
@@ -698,6 +700,7 @@ TEST_CASE(Unit_hipHostRegister_Flags) {
 
 #if (HT_AMD == 1) && (HT_LINUX == 1)
   if (IsNavi4X() && (flags.value & hipExtHostRegisterUncached)) {
+    free(hostPtr);
     return;
   }
 #endif
@@ -710,6 +713,7 @@ TEST_CASE(Unit_hipHostRegister_Flags) {
   }
   free(hostPtr);
 }
+
 /**
  * Test Description
  * ------------------------
@@ -721,7 +725,7 @@ TEST_CASE(Unit_hipHostRegister_Flags) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipHostRegister_Negative) {
+HIP_TEST_CASE(Unit_hipHostRegister_Negative) {
   int* hostPtr = nullptr;
 
   size_t sizeBytes = 1 * sizeof(int);
@@ -747,7 +751,12 @@ TEST_CASE(Unit_hipHostRegister_Negative) {
   SECTION("hipHostRegister Negative Test - invalid memory size") {
     INFO("Trying to allocate: " << memFree);
     INFO("Host: " << hostMemFree << " device: " << devMemFree);
-    HIP_CHECK_ERROR(hipHostRegister(hostPtr, memFree, 0), hipErrorInvalidValue);
+    hipError_t localError = hipHostRegister(hostPtr, memFree, 0);
+    // The huge range may overlap other mapped regions in the process address space, so
+    // backends can report either invalid size or an already-mapped range.
+    REQUIRE((localError == hipErrorInvalidValue || 
+             localError == hipErrorAlreadyMapped ||
+             localError == hipErrorHostMemoryAlreadyRegistered));
   }
 
   free(hostPtr);
@@ -756,7 +765,81 @@ TEST_CASE(Unit_hipHostRegister_Negative) {
   }
 }
 
-TEST_CASE(Unit_hipHostRegister_Capture) {
+/**
+ * Verifies that hipHostRegister rejects a duplicate or overlapping registration
+ * of a host range that is already registered, returning
+ * hipErrorHostMemoryAlreadyRegistered.
+ */
+HIP_TEST_CASE(Unit_hipHostRegister_DuplicateAndDisjoint) {
+  constexpr size_t pageSize = 4096;
+  const size_t sizeBytes = 4 * pageSize;
+  uint8_t* A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
+  REQUIRE(A != nullptr);
+
+  HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
+
+  SECTION("Same pointer, same size") {
+    HIP_CHECK_ERROR(hipHostRegister(A, sizeBytes, 0), hipErrorHostMemoryAlreadyRegistered);
+  }
+  SECTION("Same pointer, smaller size") {
+    HIP_CHECK_ERROR(hipHostRegister(A, sizeBytes / 2, 0), hipErrorHostMemoryAlreadyRegistered);
+  }
+  SECTION("Pointer inside an already-registered range") {
+    HIP_CHECK_ERROR(hipHostRegister(A + pageSize, pageSize, 0),
+                    hipErrorHostMemoryAlreadyRegistered);
+  }
+  SECTION("Disjoint segments of one allocation both register") {
+    // A single allocation split into two non-overlapping segments: [B, half) and
+    // [B + half, half). They are distinct byte ranges, so neither is falsely rejected
+    // even though they come from the same malloc (and may share a boundary page, which
+    // is handled underneath in ROCr/thunk).
+    const size_t bufBytes = 10000;
+    const size_t half = bufBytes / 2;  // 10000 -> [B, 5000) and [B + 5000, 5000)
+    uint8_t* B = reinterpret_cast<uint8_t*>(malloc(bufBytes));
+    REQUIRE(B != nullptr);
+    HIP_CHECK(hipHostRegister(B, half, 0));
+    HIP_CHECK(hipHostRegister(B + half, half, 0));
+    HIP_CHECK(hipHostUnregister(B));
+    HIP_CHECK(hipHostUnregister(B + half));
+    free(B);
+  }
+  SECTION("New range overlapping an existing one from the left is rejected") {
+    // Register an interior segment first, then a range that starts before it and
+    // overlaps into it. A containment-only check on the start pointer would miss this;
+    // the interval-overlap check must reject it (matches CUDA).
+    const size_t bufBytes = 10000;
+    const size_t half = bufBytes / 2;
+    uint8_t* B = reinterpret_cast<uint8_t*>(malloc(bufBytes));
+    REQUIRE(B != nullptr);
+    HIP_CHECK(hipHostRegister(B + half, half, 0));  // [B+5000, 5000)
+    // [B, 7000) starts before and overlaps [B+5000, B+7000).
+    HIP_CHECK_ERROR(hipHostRegister(B, 7000, 0), hipErrorHostMemoryAlreadyRegistered);
+    HIP_CHECK(hipHostUnregister(B + half));
+    free(B);
+  }
+  SECTION("New range fully containing a smaller existing one is rejected") {
+    const size_t bufBytes = 4 * pageSize;
+    uint8_t* B = reinterpret_cast<uint8_t*>(malloc(bufBytes));
+    REQUIRE(B != nullptr);
+    HIP_CHECK(hipHostRegister(B + pageSize, 256, 0));  // small interior registration
+    // [B, bufBytes) fully contains the small registration above.
+    HIP_CHECK_ERROR(hipHostRegister(B, bufBytes, 0), hipErrorHostMemoryAlreadyRegistered);
+    HIP_CHECK(hipHostUnregister(B + pageSize));
+    free(B);
+  }
+
+  // The original registration must still be intact and unregister cleanly (a rejected
+  // duplicate must not have consumed or leaked it).
+  HIP_CHECK(hipHostUnregister(A));
+
+  // After unregister, re-registering the same range must succeed (no stale state).
+  HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
+  HIP_CHECK(hipHostUnregister(A));
+
+  free(A);
+}
+
+HIP_TEST_CASE(Unit_hipHostRegister_Capture) {
   constexpr size_t kBufferSize = 1024;
   auto buffer = std::make_unique<int[]>(kBufferSize);
   hipError_t capture_error = hipSuccess;
@@ -771,6 +854,117 @@ TEST_CASE(Unit_hipHostRegister_Capture) {
   }
 }
 
+/**
+ * Test Description
+ * ------------------------
+ *    - This testcase verifies hipExtHostRegisterCoarseGrained flags of hipHostRegister.
+ *    - In this case L2 cache is enabled on device, atomic is valid on device only,
+ *    - and perf will be better.
+ * Test source
+ * ------------------------
+ *    - catch\unit\memory\hipHostRegister.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_hipHostRegister_with_coarse_grain) {
+#if HT_AMD
+  const size_t count = 65536;
+  const size_t threadsPerBlock = 64;
+  size_t sizeBytes = sizeof(float);
+  float* hostPtr = reinterpret_cast<float*>(malloc(sizeBytes));
+  float* devicePtr = nullptr;
+  *hostPtr = 0;
+  HIP_CHECK(hipHostRegister(hostPtr, sizeBytes, hipExtHostRegisterCoarseGrained));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&devicePtr), hostPtr, 0));
+  AtomicFAddKernelKernel<<<(count + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(
+      devicePtr, count);
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipHostUnregister(hostPtr));
+  std::cout << "hostPtr=" << hostPtr << ", devicePtr=" << devicePtr << std::endl;
+  if (*hostPtr == static_cast<float>(count)) {
+    std::cout << "__builtin_amdgcn_global_atomic_fadd_f32 works well on coarse grain!"
+              << std::endl;
+    REQUIRE(true);
+  } else if (*hostPtr == -1.0f) {
+    std::cout << "__builtin_amdgcn_global_atomic_fadd_f32 not supported!" << std::endl;
+    REQUIRE(true);
+  } else {
+    std::cout << count << " -> " << *hostPtr << std::endl;
+    REQUIRE(false);
+  }
+  free(hostPtr);
+#endif
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - This testcase verifies hipHostRegisterDefault (fine-grain) flags of hipHostRegister
+ *    - with __builtin_amdgcn_global_atomic_fadd_f32.
+ *    - The builtin hardcodes agent scope. Behavior varies by chip:
+ *    - * Chips with AgentScopeFineGrainedRemoteMemoryAtomics (gfx942, gfx945, gfx950, GFX12+):
+ *    -   native global_atomic_add_f32 at agent scope is coherent on fine-grain host memory;
+ *    -   atomic succeeds and hostPtr equals count.
+ *    - * Chips without the native instruction (GFX9 consumer, GFX10):
+ *    -   backend expands to a CAS loop; global_atomic_cmpswap is PCIe-native so it
+ *    -   works on fine-grain host memory; atomic succeeds and hostPtr equals count.
+ *    - * Chips with the native instruction but without AgentScopeFineGrainedRemoteMemoryAtomics
+ *    -   (gfx908, gfx90a, GFX11): agent-scope coherency on PCIe host memory is not
+ *    -   guaranteed; result may be a partial sum.
+ * Test source
+ * ------------------------
+ *    - catch\unit\memory\hipHostRegister.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_hipHostRegister_with_fine_grain) {
+#if HT_AMD
+  const size_t count = 65536;
+  const size_t threadsPerBlock = 64;
+  size_t sizeBytes = sizeof(float);
+  float* hostPtr = reinterpret_cast<float*>(malloc(sizeBytes));
+  float* devicePtr = nullptr;
+  *hostPtr = 0;
+  HIP_CHECK(hipHostRegister(hostPtr, sizeBytes, hipHostRegisterDefault));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&devicePtr), hostPtr, 0));
+  AtomicFAddKernelKernel<<<(count + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(
+      devicePtr, count);
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipHostUnregister(hostPtr));
+  std::cout << "hostPtr=" << hostPtr << ", devicePtr=" << devicePtr << std::endl;
+
+  hipDeviceProp_t prop;
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  std::string archName(prop.gcnArchName);
+  // Chips with native global_atomic_add_f32 but without
+  // AgentScopeFineGrainedRemoteMemoryAtomics: agent-scope coherency on PCIe
+  // host memory is not guaranteed, so a partial/racy result is acceptable.
+  const bool partialResultExpected =
+      archName.find("gfx908") != std::string::npos ||
+      archName.find("gfx90a") != std::string::npos ||
+      archName.find("gfx11") != std::string::npos;
+
+  if (*hostPtr == static_cast<float>(count)) {
+    // Atomic succeeded: either via native global_atomic_add_f32 (chips with
+    // AgentScopeFineGrainedRemoteMemoryAtomics) or via CAS loop expansion
+    // (all other chips, since global_atomic_cmpswap is PCIe-native).
+    std::cout << "__builtin_amdgcn_global_atomic_fadd_f32 succeeded on fine grain!"
+              << std::endl;
+    REQUIRE(true);
+  } else if (*hostPtr == -1.0f) {
+    std::cout << "__builtin_amdgcn_global_atomic_fadd_f32 not supported!" << std::endl;
+    REQUIRE(true);
+  } else {
+    // Partial/racy result: only expected on chips where agent-scope coherency
+    // on PCIe host memory is not guaranteed (gfx908, gfx90a, GFX11 discrete).
+    std::cout << count << " -> " << *hostPtr << std::endl;
+    REQUIRE(partialResultExpected);
+  }
+  free(hostPtr);
+#endif
+}
 /**
  * End doxygen group MemoryTest.
  * @}

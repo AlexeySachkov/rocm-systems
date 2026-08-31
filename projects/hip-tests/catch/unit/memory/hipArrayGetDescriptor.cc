@@ -150,7 +150,7 @@ static hipArray_t arrayCreate2D_Thread() {
 // Thread function for 1D Array
 void thread_funct1D(hipArray_t array) {
   HIP_ARRAY_DESCRIPTOR desc;
-  HIP_CHECK(hipArrayGetDescriptor(&desc, array));
+  HIP_CHECK_THREAD(hipArrayGetDescriptor(&desc, array));
   // Verify array parameters
   if ((desc.NumChannels == 2) && (desc.Width == 16) && (desc.Height == 0) &&
       (desc.Format == HIP_AD_FORMAT_HALF)) {
@@ -162,7 +162,7 @@ void thread_funct1D(hipArray_t array) {
 // Thread function for 2D Array
 void thread_funct2D(hipArray_t array) {
   HIP_ARRAY_DESCRIPTOR desc;
-  HIP_CHECK(hipArrayGetDescriptor(&desc, array));
+  HIP_CHECK_THREAD(hipArrayGetDescriptor(&desc, array));
   // Verify array parameters
   if ((desc.NumChannels == 1) && (desc.Width == 4) && (desc.Height == 4) &&
       (desc.Format == HIP_AD_FORMAT_FLOAT)) {
@@ -220,7 +220,7 @@ float* funcToChkArray(hipArray_t array) {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk) {
+HIP_TEST_CASE(Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -305,7 +305,7 @@ TEST_CASE(Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk) {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array) {
+HIP_TEST_CASE(Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -332,6 +332,7 @@ TEST_CASE(Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array) {
     for (auto& t : ThreadVector2D) {
       t.join();
     }
+    HIP_CHECK_THREAD_FINALIZE();
     // Validation
     REQUIRE(testPassed1D);
     REQUIRE(testPassed2D);
@@ -355,7 +356,7 @@ TEST_CASE(Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array) {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipArrayGetDescriptor_Host2Array_Array2Host) {
+HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Host2Array_Array2Host) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -425,7 +426,7 @@ TEST_CASE(Unit_hipArrayGetDescriptor_Host2Array_Array2Host) {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipArrayGetDescriptor_Negative_Scenarios) {
+HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Negative_Scenarios) {
   hipError_t error;
   HIP_ARRAY_DESCRIPTOR desc_Neg;
   SECTION("Array Address As Nullptr") {
@@ -463,7 +464,7 @@ TEST_CASE(Unit_hipArrayGetDescriptor_Negative_Scenarios) {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE(Unit_hipArrayGetDescriptor_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Positive_Basic) {
   CHECK_IMAGE_SUPPORT
 
   HIP_ARRAY_DESCRIPTOR expected_desc{};
@@ -498,7 +499,7 @@ TEST_CASE(Unit_hipArrayGetDescriptor_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE(Unit_hipArrayGetDescriptor_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   HIP_ARRAY_DESCRIPTOR expected_desc{};

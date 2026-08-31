@@ -29,7 +29,7 @@
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipMemExportToShareableHandle_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Positive_Basic) {
   HIP_CHECK(hipFree(0));
 
   hipDevice_t device;
@@ -68,7 +68,7 @@ TEST_CASE(Unit_hipMemExportToShareableHandle_Positive_Basic) {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipMemExportToShareableHandle_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Negative_Parameters) {
   HIP_CHECK(hipFree(0));
 
   hipDevice_t device;
@@ -117,7 +117,7 @@ TEST_CASE(Unit_hipMemExportToShareableHandle_Negative_Parameters) {
   HIP_CHECK(hipMemRelease(handle));
 }
 
-TEST_CASE(Unit_hipMemExportToShareableHandle_Capture) {
+HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Capture) {
   CTX_CREATE();
 
   hipDevice_t device;
@@ -155,6 +155,70 @@ TEST_CASE(Unit_hipMemExportToShareableHandle_Capture) {
 
   CTX_DESTROY();
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Export Fabric Handle to stdout
+ * ------------------------
+ *    - unit/virtualMemoryManagement/hipMemExportToShareableHandle.cc
+ * Test requirements
+ * ------------------------
+ *    - Host specific (LINUX)
+ *    - HIP_VERSION >= 7.1
+ */
+TEST_CASE("Unit_hipMemExportFabricHandleToStdout_Positive_Basic") {
+  CTX_CREATE();
+
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkVMMSupported(device);
+  checkFabricHandleSupported(device);
+
+  hipMemAllocationProp prop = {};
+  prop.type = hipMemAllocationTypePinned;
+  prop.requestedHandleTypes = hipMemHandleTypeFabric;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;
+
+  size_t granularity;
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+
+  size_t allocSize = 4096;
+  allocSize = ((granularity + allocSize -1) / granularity) * granularity;
+
+  hipDeviceptr_t addr = 0;
+  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&addr), allocSize, 0, 0, 0));
+
+  hipMemGenericAllocationHandle_t allocHandle;
+  HIP_CHECK(hipMemCreate(&allocHandle, granularity * 2, &prop, 0));
+
+  HIP_CHECK(hipMemMap(reinterpret_cast<void*>(addr), allocSize, 0, allocHandle, 0));
+
+  hipMemAccessDesc accessDesc{};
+  accessDesc.location = prop.location;
+  accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(reinterpret_cast<void*>(addr), allocSize, &accessDesc, 1));
+
+  int fabrichandle;
+  hipError_t err = hipMemExportToShareableHandle(reinterpret_cast<void*>(&fabrichandle), allocHandle,
+                                                 hipMemHandleTypeFabric, 0);
+  if (err == hipErrorNotReady) {
+    HIP_SKIP_TEST("Accelerator not ready for fabric handle export.");
+  }
+  HIP_CHECK(err);
+
+  REQUIRE(fabrichandle != 0);
+
+  HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(addr), allocSize));
+  HIP_CHECK(hipMemRelease(allocHandle));
+  HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(addr), allocSize));
+
+  CTX_DESTROY();
+}
+
+
 
 /**
  * End doxygen group VirtualMemoryManagementTest.

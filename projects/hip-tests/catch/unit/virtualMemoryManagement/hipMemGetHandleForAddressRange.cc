@@ -92,7 +92,7 @@ hipMemGenericAllocationHandle_t GetPhysicalMemory(hipDevice_t device, size_t siz
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE(Unit_hipMemGetHandleForAddressRange_Negative) {
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_Negative) {
   int handle = -1;
   int* dptr = nullptr;
   constexpr int size = 10;
@@ -371,7 +371,7 @@ bool validateHandle(int handle, int size, int device = 0) {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE(Unit_hipMemGetHandleForAddressRange_DeviceMemory) {
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_DeviceMemory) {
   constexpr int size = 1024;
   constexpr int sizeBytes = size * sizeof(int);
   CTX_CREATE();
@@ -410,7 +410,7 @@ TEST_CASE(Unit_hipMemGetHandleForAddressRange_DeviceMemory) {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE(Unit_hipMemGetHandleForAddressRange_VM) {
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_VM) {
   CTX_CREATE();
   hipDevice_t device;
   constexpr int kDeviceId = 0;
@@ -453,13 +453,12 @@ TEST_CASE(Unit_hipMemGetHandleForAddressRange_VM) {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE(Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice) {
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice) {
   CTX_CREATE();
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   constexpr int srcDeviceId = 0;
@@ -508,13 +507,12 @@ TEST_CASE(Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice) {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE(Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice) {
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice) {
   CTX_CREATE();
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   constexpr int srcDeviceId = 0;
@@ -571,7 +569,7 @@ TEST_CASE(Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice) {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem) {
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem) {
   int fd[2], fdSig[2];
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
@@ -675,7 +673,7 @@ TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem) {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM) {
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM) {
   int fd[2], fdSig[2];
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
@@ -818,7 +816,7 @@ void launchForVM() {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE(Unit_hipMemGetHandleForAddressRange_MultipleThreads) {
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MultipleThreads) {
   hipDevice_t device;
   constexpr int kDeviceId = 0;
   HIP_CHECK(hipDeviceGet(&device, kDeviceId));
@@ -865,7 +863,7 @@ TEST_CASE(Unit_hipMemGetHandleForAddressRange_MultipleThreads) {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE(Unit_hipMemGetHandleForAddressRange_DifferentOffsets) {
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_DifferentOffsets) {
   hipDevice_t device;
   constexpr int kDeviceId = 0;
   HIP_CHECK(hipDeviceGet(&device, kDeviceId));
@@ -886,4 +884,73 @@ TEST_CASE(Unit_hipMemGetHandleForAddressRange_DifferentOffsets) {
   }
 
   HIP_CHECK(hipFree(dptr));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Regression test for a leak in hipMemGetHandleForAddressRange(): exporting a DMA-BUF
+ *  - handle for a VMM address range retained an internal HSA allocation reference that was
+ *  - never released. Closing the returned fd, unmapping the address, and releasing the
+ *  - hipMemCreate() handle therefore did not reclaim the physical allocation.
+ *  - This test creates one VMM allocation, exports and closes its DMA-BUF handle, releases
+ *  - the allocation, and checks via hipMemGetInfo() that the memory is actually reclaimed.
+ * Test source
+ * ------------------------
+ *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRange.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_NoLeakOnRelease) {
+  hipDevice_t device;
+  constexpr int kDeviceId = 0;
+  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  checkDmaBufSupported(device);
+  checkVMMSupported(device);
+
+  size_t granularity = GetGranularity(kDeviceId);
+  REQUIRE(granularity > 0);
+
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = kDeviceId;
+
+  hipMemGenericAllocationHandle_t memHandle;
+  HIP_CHECK(hipMemCreate(&memHandle, granularity, &prop, 0));
+
+  hipDeviceptr_t ptr;
+  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&ptr), granularity, granularity, 0, 0));
+  HIP_CHECK(hipMemMap(reinterpret_cast<void*>(ptr), granularity, 0, memHandle, 0));
+
+  hipMemAccessDesc accessDesc{};
+  accessDesc.location.type = hipMemLocationTypeDevice;
+  accessDesc.location.id = kDeviceId;
+  accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(reinterpret_cast<void*>(ptr), granularity, &accessDesc, 1));
+
+  HIP_CHECK(hipDeviceSynchronize());
+  size_t freeBefore = 0, total = 0;
+  HIP_CHECK(hipMemGetInfo(&freeBefore, &total));
+
+  int dmaBufFd = -1;
+  HIP_CHECK(hipMemGetHandleForAddressRange(&dmaBufFd, ptr, granularity,
+                                           hipMemRangeHandleTypeDmaBufFd, 0));
+  REQUIRE(dmaBufFd > 0);
+  REQUIRE(close(dmaBufFd) == 0);
+
+  HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(ptr), granularity));
+  HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(ptr), granularity));
+  HIP_CHECK(hipMemRelease(memHandle));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  size_t freeAfter = 0;
+  HIP_CHECK(hipMemGetInfo(&freeAfter, &total));
+
+  // Once the fd, VA and allocation handle are all released, the physical allocation must be
+  // reclaimed. Before the fix, the retained-but-never-released HSA handle kept it resident,
+  // so freeAfter stayed pinned at freeBefore.
+  size_t reclaimed = (freeAfter > freeBefore) ? (freeAfter - freeBefore) : 0;
+  REQUIRE(reclaimed >= granularity / 2);
 }

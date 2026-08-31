@@ -1,29 +1,9 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "rocm_smi/rocm_smi_binary_parser.h"
 
 #include <dirent.h>
-#include <pthread.h>
 
 #include <cassert>
 #include <cinttypes>
@@ -79,9 +59,9 @@ static int parse_pmmetric_table(uint8_t* buf, struct metric_field* table, int32_
         *kv = reinterpret_cast<rsmi_name_value_t*>(realloc(*kv, kvsize * (sizeof **kv)));
       }
       if (table[x].field_arr_size == 1) {
-        sprintf((*kv)[*kvnum].name, "%s", table[x].field_name);
+        snprintf((*kv)[*kvnum].name, sizeof((*kv)[*kvnum].name), "%s", table[x].field_name);
       } else {
-        sprintf((*kv)[*kvnum].name, "%s[%d]", table[x].field_name, y);
+        snprintf((*kv)[*kvnum].name, sizeof((*kv)[*kvnum].name), "%s[%d]", table[x].field_name, y);
       }
       (*kv)[*kvnum].value = v1;
 
@@ -113,6 +93,7 @@ int present_pmmetrics(const char* fname, rsmi_name_value_t** kv, uint32_t* kvnum
 
   buf1 = reinterpret_cast<uint8_t*>(calloc(1, 65536));
   if (!buf1) {
+    fclose(infile);
     return -1;
   }
 
@@ -127,6 +108,8 @@ int present_pmmetrics(const char* fname, rsmi_name_value_t** kv, uint32_t* kvnum
       break;
     default:
       fprintf(stderr, "Metrics version %d not supported\n", pmmetrics_version);
+      fclose(infile);
+      free(buf1);
       return -1;
   }
   r = parse_pmmetric_table(buf1, table, len, kv, kvnum);
@@ -195,15 +178,19 @@ top:
         kvsize += 64;
         *kv = reinterpret_cast<rsmi_name_value_t*>(realloc(*kv, kvsize * (sizeof **kv)));
       }
-      sprintf((*kv)[*kvnum].name, "%s", table[x].field_name);
+      snprintf((*kv)[*kvnum].name, sizeof((*kv)[*kvnum].name), "%s", table[x].field_name);
       if (table[x].field_arr_size > 1) {
-        sprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name), "[%" PRId64 "]", y);
+        snprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name),
+                 sizeof((*kv)[*kvnum].name) - strlen((*kv)[*kvnum].name), "[%" PRIu64 "]", y);
       }
       if (x >= instance_start)
-        sprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name), ".instance[%" PRId64 "]",
-                cur_instance);
+        snprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name),
+                 sizeof((*kv)[*kvnum].name) - strlen((*kv)[*kvnum].name), ".instance[%" PRIu64 "]",
+                 cur_instance);
       if (x >= smn_start)
-        sprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name), ".smn[%" PRId64 "]", cur_smn);
+        snprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name),
+                 sizeof((*kv)[*kvnum].name) - strlen((*kv)[*kvnum].name), ".smn[%" PRIu64 "]",
+                 cur_smn);
       (*kv)[*kvnum].value = v;
       ++(*kvnum);
     }

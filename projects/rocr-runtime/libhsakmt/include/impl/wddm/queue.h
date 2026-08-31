@@ -54,6 +54,7 @@
 #include "hsa-runtime/inc/amd_hsa_queue.h"
 #include "hsa-runtime/inc/amd_hsa_signal.h"
 #include "impl/wddm/cmd_util.h"
+#include "util/atomic_helpers.h"
 
 namespace wsl {
 namespace thunk {
@@ -172,7 +173,10 @@ public:
   bool IsInvalidPacket(void) const {
     uint16_t *packet = (uint16_t *)((char *)ring +
                        (cmdbuf_aql_frame_write_index % ring_size) * 64);
-    return ((*packet >> HSA_PACKET_HEADER_TYPE) & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1))
+    // Acquire-load to pair with the producer's release publication, consistent
+    // with SwitchAql2PM4(); a plain read races a burst commit's not-yet-published slot.
+    uint16_t header = rocr::atomic::Load(packet, std::memory_order_acquire);
+    return ((header >> HSA_PACKET_HEADER_TYPE) & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1))
            == HSA_PACKET_TYPE_INVALID;
   }
 
@@ -202,8 +206,8 @@ public:
   hsa_status_t PreSubmit(void);
   hsa_status_t EndSubmit(void);
 
-  void *ring;         //!< AQL queue, allocated in ROCR and points to the AQL packets
-  uint64_t ring_size; //!< AQL queue size in packets
+  void *ring; //!< AQL queue, allocated in ROCR and points to the AQL packets
+  uint64_t ring_size;
 
   // ib_start_addr is the current ib start address
   uint64_t ib_start_addr;
@@ -229,7 +233,7 @@ private:
     return AMD_HSA_BITS_GET(amd_queue_rocr_->queue_properties, AMD_QUEUE_PROPERTIES_ENABLE_PROFILING);
   }
   void HandleError(hsa_status_t status);
-  bool UpdateScratch(hsa_kernel_dispatch_packet_t *packet, bool wave32);
+  bool UpdateScratch(uint32_t private_segment_size, bool wave32);
 
   uint32_t UpdateIndexStride(uint32_t srd, bool wave32);
 
@@ -257,7 +261,7 @@ private:
   std::condition_variable thread_cond_;
   static void AqlToPm4Thread(ComputeQueue *queue);
 
-  uint64_t max_scratch_waves_;
+  uint64_t scratch_waves_;
   uint64_t dispatch_waves_;
   uint64_t scratch_size_per_wave_;
   uint64_t scratch_size_;
@@ -267,7 +271,7 @@ private:
   GpuMemoryHandle scratch_mem_;
 
   std::vector<int> scratch_base_offset_array_;
-  bool aql_;  //!< The queue is configured to the AQL execution
+  bool native_aql_ = false;  //!< Queue submits AQL packets directly without PM4 translation
 };
 
 class SDMAQueue : public WDDMQueue {

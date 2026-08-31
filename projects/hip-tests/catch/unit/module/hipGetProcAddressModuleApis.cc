@@ -25,7 +25,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipGetProcAddress_ModuleApis) {
+HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApis) {
   void* hipModuleLoad_ptr = nullptr;
   void* hipModuleUnload_ptr = nullptr;
   void* hipModuleGetFunction_ptr = nullptr;
@@ -203,11 +203,18 @@ TEST_CASE(Unit_hipGetProcAddress_ModuleApis) {
                                         HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT};
 
   for (auto attribute : attributes) {
+
     int valuewithOrgAPI = 0, valueWithFuncPointer = 0;
 
-    HIP_CHECK(hipFuncGetAttribute(&valuewithOrgAPI, attribute, function));
-    HIP_CHECK(dyn_hipFuncGetAttribute_ptr(&valueWithFuncPointer, attribute, function));
+    hipError_t err1 = hipFuncGetAttribute(&valuewithOrgAPI, attribute, function);
+    hipError_t err2 = dyn_hipFuncGetAttribute_ptr(&valueWithFuncPointer, attribute, function);
 
+    if (err1 == hipErrorNotSupported) {
+      continue;
+    }
+
+    HIP_CHECK_ERROR(err1, hipSuccess);
+    HIP_CHECK_ERROR(err2, hipSuccess);
     REQUIRE(valueWithFuncPointer == valuewithOrgAPI);
   }
 
@@ -249,7 +256,7 @@ TEST_CASE(Unit_hipGetProcAddress_ModuleApis) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipGetProcAddress_ModuleApisLoadData) {
+HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisLoadData) {
   void* hipModuleLoadData_ptr = nullptr;
   void* hipModuleLoadDataEx_ptr = nullptr;
 
@@ -315,10 +322,9 @@ TEST_CASE(Unit_hipGetProcAddress_ModuleApisLoadData) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipGetProcAddress_ModuleApisCooperativeKernels) {
+HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisCooperativeKernels) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   HIP_CHECK(hipSetDevice(0));
@@ -563,7 +569,7 @@ TEST_CASE(Unit_hipGetProcAddress_ModuleApisCooperativeKernels) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipGetProcAddress_ModuleApisOccupancy) {
+HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisOccupancy) {
   void* hipModuleOccupancyMaxPotentialBlockSize_ptr = nullptr;
   void* hipModuleOccupancyMaxPotentialBlockSizeWithFlags_ptr = nullptr;
   void* hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_ptr = nullptr;

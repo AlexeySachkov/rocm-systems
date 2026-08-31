@@ -31,7 +31,7 @@ constexpr auto fileName = "managed_kernel.code";
  * - HIP_VERSION >= 5.6
 */
 
-TEST_CASE(Unit_hipModuleGetGlobal_Functional) {
+HIP_TEST_CASE(Unit_hipModuleGetGlobal_Functional) {
   bool testStatus = true;
   int numDevices = 0;
   hipDeviceptr_t x;
@@ -39,12 +39,7 @@ TEST_CASE(Unit_hipModuleGetGlobal_Functional) {
   int data;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int i = 0; i < numDevices; i++) {
-    int managed_memory = 0;
-    HIPCHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
-    if (!managed_memory) {
-      HipTest::HIP_SKIP_TEST("managed memory access not supported on device");
-      return;
-    }
+    CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(i)
   }
   for (int i = 0; i < numDevices; i++) {
     HIP_CHECK(hipSetDevice(i));

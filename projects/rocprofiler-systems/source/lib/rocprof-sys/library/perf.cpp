@@ -1,35 +1,17 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/perf.hpp"
+#include "common/units.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
 #include "library/thread_data.hpp"
+#include <cstdint>
 
 #include <timemory/log/logger.hpp>
 #include <timemory/log/macros.hpp>
-#include <timemory/units.hpp>
 
 #include "logger/debug.hpp"
 
@@ -41,7 +23,6 @@
 #include <poll.h>
 #include <regex>
 #include <signal.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -116,7 +97,7 @@ perf_event::~perf_event() { close(); }
 perf_event&
 perf_event::operator=(perf_event&& rhs) noexcept
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
     if(&rhs == this) return *this;
 
     // Release resources if the current perf_event is initialized and not equal to this
@@ -143,10 +124,10 @@ perf_event::operator=(perf_event&& rhs) noexcept
 std::optional<std::string>
 perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-    m_sample_type = _pe.sample_type;
-    m_read_format = _pe.read_format;
-    m_batch_size  = _pe.wakeup_events;
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    m_sample_type            = _pe.sample_type;
+    m_read_format            = _pe.read_format;
+    m_batch_size             = _pe.wakeup_events;
 
     // Set some mandatory fields
     _pe.size     = sizeof(struct perf_event_attr);
@@ -156,7 +137,7 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
     m_fd = perf_event_open(&_pe, _pid, _cpu, -1, 0);
     if(m_fd == -1)
     {
-        std::string path = "/proc/sys/kernel/perf_event_paranoid";
+        const std::string path = "/proc/sys/kernel/perf_event_paranoid";
 
         auto file = std::ifstream{ path.c_str() };
 
@@ -173,7 +154,7 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
             true, "Failed to open perf event. Consider tweaking "
                       << path << " to 2 or less " << "(current value is " << value
                       << "), "
-                      << "or run rocprof-sys as a privileged user (with CAP_SYS_ADMIN).");
+                      << "or granting rocprof-sys CAP_PERFMON (or CAP_SYS_ADMIN).");
     }
 
     // If sampling, map the perf event file
@@ -195,10 +176,10 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
 }
 
 std::optional<std::string>
-perf_event::open(double _freq, uint32_t _batch_size, pid_t _pid, int _cpu)
+perf_event::open(double _freq, std::uint32_t _batch_size, pid_t _pid, int _cpu)
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-    uint64_t               _period = (1.0 / _freq) * units::sec;
+    auto _thread_state_guard       = state::thread::scoped(state::thread::Internal);
+    const std::uint64_t    _period = (1.0 / _freq) * units::sec;
     struct perf_event_attr _pe;
 
     if(_batch_size > 0)
@@ -236,11 +217,11 @@ perf_event::get_fileno() const
 }
 
 /// Read event count
-uint64_t
+std::uint64_t
 perf_event::get_count() const
 {
-    uint64_t count;
-    if(read(m_fd, &count, sizeof(uint64_t)) != sizeof(uint64_t))
+    std::uint64_t count;
+    if(read(m_fd, &count, sizeof(std::uint64_t)) != sizeof(std::uint64_t))
     {
         LOG_CRITICAL("Failed to read event count from perf_event file");
         std::exit(1);
@@ -254,7 +235,7 @@ perf_event::start() const
 {
     if(m_fd != -1)
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
         if(ioctl(m_fd, PERF_EVENT_IOC_ENABLE, 0) == -1)
         {
             LOG_CRITICAL("Failed to start perf event: {}", strerror(errno));
@@ -270,7 +251,7 @@ perf_event::stop() const
 {
     if(m_fd != -1)
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
         if(ioctl(m_fd, PERF_EVENT_IOC_DISABLE, 0) == -1)
         {
             LOG_CRITICAL("Failed to stop perf event: {}", strerror(errno));
@@ -289,7 +270,7 @@ perf_event::is_open() const
 void
 perf_event::close()
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
     stop();
 
     if(m_fd != -1)
@@ -308,7 +289,7 @@ perf_event::close()
 void
 perf_event::set_ready_signal(int sig) const
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
     // Set the perf_event file to async
     if(fcntl(m_fd, F_SETFL, fcntl(m_fd, F_GETFL, 0) | O_ASYNC) == -1)
     {
@@ -335,7 +316,7 @@ perf_event::set_ready_signal(int sig) const
 void
 perf_event::iterator::next()
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     struct perf_event_header _hdr;
 
@@ -387,7 +368,7 @@ perf_event::iterator::operator!=(const iterator& other) const
 perf_event::record
 perf_event::iterator::get()
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     // Copy out the record header
     perf_event::copy_from_ring_buffer(m_mapping, m_index, _buf,
@@ -434,11 +415,11 @@ void
 perf_event::copy_from_ring_buffer(struct perf_event_mmap_page* _mapping, ptrdiff_t _index,
                                   void* _dest, size_t _nbytes)
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
-    uintptr_t _base    = reinterpret_cast<uintptr_t>(_mapping) + sizes.page;
-    size_t    _beg_idx = _index % sizes.data;
-    size_t    _end_idx = _beg_idx + _nbytes;
+    const uintptr_t _base    = reinterpret_cast<uintptr_t>(_mapping) + sizes.page;
+    const size_t    _beg_idx = _index % sizes.data;
+    const size_t    _end_idx = _beg_idx + _nbytes;
 
     if(_end_idx <= sizes.data)
     {
@@ -446,8 +427,8 @@ perf_event::copy_from_ring_buffer(struct perf_event_mmap_page* _mapping, ptrdiff
     }
     else
     {
-        size_t _chunk_size2 = _end_idx - sizes.data;
-        size_t _chunk_size1 = _nbytes - _chunk_size2;
+        const size_t _chunk_size2 = _end_idx - sizes.data;
+        const size_t _chunk_size1 = _nbytes - _chunk_size2;
 
         void* _dest2 =
             reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_dest) + _chunk_size1);
@@ -457,7 +438,7 @@ perf_event::copy_from_ring_buffer(struct perf_event_mmap_page* _mapping, ptrdiff
     }
 }
 
-uint64_t
+std::uint64_t
 perf_event::record::get_ip() const
 {
     if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::ip))
@@ -466,10 +447,10 @@ perf_event::record::get_ip() const
                      static_cast<const void*>(m_source));
         std::abort();
     }
-    return *locate_field<sample::ip, uint64_t*>();
+    return *locate_field<sample::ip, std::uint64_t*>();
 }
 
-uint64_t
+std::uint64_t
 perf_event::record::get_pid() const
 {
     if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::pid_tid))
@@ -478,10 +459,10 @@ perf_event::record::get_pid() const
                      static_cast<const void*>(m_source));
         std::abort();
     }
-    return locate_field<sample::pid_tid, uint32_t*>()[0];
+    return locate_field<sample::pid_tid, std::uint32_t*>()[0];
 }
 
-uint64_t
+std::uint64_t
 perf_event::record::get_tid() const
 {
     if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::pid_tid))
@@ -490,10 +471,10 @@ perf_event::record::get_tid() const
                      static_cast<const void*>(m_source));
         std::abort();
     }
-    return locate_field<sample::pid_tid, uint32_t*>()[1];
+    return locate_field<sample::pid_tid, std::uint32_t*>()[1];
 }
 
-uint64_t
+std::uint64_t
 perf_event::record::get_time() const
 {
     if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::time))
@@ -502,10 +483,10 @@ perf_event::record::get_time() const
                      static_cast<const void*>(m_source));
         std::abort();
     }
-    return *locate_field<sample::time, uint64_t*>();
+    return *locate_field<sample::time, std::uint64_t*>();
 }
 
-uint64_t
+std::uint64_t
 perf_event::record::get_period() const
 {
     if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::period))
@@ -514,10 +495,10 @@ perf_event::record::get_period() const
                      static_cast<const void*>(m_source));
         std::abort();
     }
-    return *locate_field<sample::period, uint64_t*>();
+    return *locate_field<sample::period, std::uint64_t*>();
 }
 
-uint32_t
+std::uint32_t
 perf_event::record::get_cpu() const
 {
     if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::cpu))
@@ -526,10 +507,10 @@ perf_event::record::get_cpu() const
                      static_cast<const void*>(m_source));
         std::abort();
     }
-    return *locate_field<sample::cpu, uint32_t*>();
+    return *locate_field<sample::cpu, std::uint32_t*>();
 }
 
-container::c_array<uint64_t>
+container::c_array<std::uint64_t>
 perf_event::record::get_callchain() const
 {
     if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::callchain))
@@ -539,8 +520,8 @@ perf_event::record::get_callchain() const
         std::abort();
     }
 
-    uint64_t* _base = locate_field<sample::callchain, uint64_t*>();
-    uint64_t  _size = *_base;
+    std::uint64_t*      _base = locate_field<sample::callchain, std::uint64_t*>();
+    const std::uint64_t _size = *_base;
     // Advance the callchain array pointer past the size
     ++_base;
     return container::wrap_c_array(_base, _size);
@@ -550,7 +531,7 @@ template <sample SampleT, typename Tp>
 Tp
 perf_event::record::locate_field() const
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     uintptr_t p =
         reinterpret_cast<uintptr_t>(m_header) + sizeof(struct perf_event_header);
@@ -561,84 +542,88 @@ perf_event::record::locate_field() const
 
     // ip
     if constexpr(SampleT == sample::ip) return reinterpret_cast<Tp>(p);
-    if(m_source != nullptr && m_source->is_sampling(sample::ip)) p += sizeof(uint64_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::ip))
+        p += sizeof(std::uint64_t);
 
     // pid, tid
     if constexpr(SampleT == sample::pid_tid) return reinterpret_cast<Tp>(p);
     if(m_source != nullptr && m_source->is_sampling(sample::pid_tid))
-        p += sizeof(uint32_t) + sizeof(uint32_t);
+        p += sizeof(std::uint32_t) + sizeof(std::uint32_t);
 
     // time
     if constexpr(SampleT == sample::time) return reinterpret_cast<Tp>(p);
-    if(m_source != nullptr && m_source->is_sampling(sample::time)) p += sizeof(uint64_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::time))
+        p += sizeof(std::uint64_t);
 
     // addr
     if constexpr(SampleT == sample::addr) return reinterpret_cast<Tp>(p);
-    if(m_source != nullptr && m_source->is_sampling(sample::addr)) p += sizeof(uint64_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::addr))
+        p += sizeof(std::uint64_t);
 
     // id
     if constexpr(SampleT == sample::id) return reinterpret_cast<Tp>(p);
-    if(m_source != nullptr && m_source->is_sampling(sample::id)) p += sizeof(uint64_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::id))
+        p += sizeof(std::uint64_t);
 
     // stream_id
     if constexpr(SampleT == sample::stream_id) return reinterpret_cast<Tp>(p);
     if(m_source != nullptr && m_source->is_sampling(sample::stream_id))
-        p += sizeof(uint64_t);
+        p += sizeof(std::uint64_t);
 
     // cpu
     if constexpr(SampleT == sample::cpu) return reinterpret_cast<Tp>(p);
     if(m_source != nullptr && m_source->is_sampling(sample::cpu))
-        p += sizeof(uint32_t) + sizeof(uint32_t);
+        p += sizeof(std::uint32_t) + sizeof(std::uint32_t);
 
     // period
     if constexpr(SampleT == sample::period) return reinterpret_cast<Tp>(p);
     if(m_source != nullptr && m_source->is_sampling(sample::period))
-        p += sizeof(uint64_t);
+        p += sizeof(std::uint64_t);
 
     // value
     if constexpr(SampleT == sample::read) return reinterpret_cast<Tp>(p);
     if(m_source != nullptr && m_source->is_sampling(sample::read))
     {
-        uint64_t read_format = m_source->get_read_format();
+        const std::uint64_t read_format = m_source->get_read_format();
         if(read_format & PERF_FORMAT_GROUP)
         {
             // Get the number of values in the read format structure
-            uint64_t nr = *reinterpret_cast<uint64_t*>(p);
+            const std::uint64_t nr = *reinterpret_cast<std::uint64_t*>(p);
             // The default size of each entry is a u64
-            size_t sz = sizeof(uint64_t);
+            size_t sz = sizeof(std::uint64_t);
             // If requested, the id will be included with each value
-            if(read_format & PERF_FORMAT_ID) sz += sizeof(uint64_t);
+            if(read_format & PERF_FORMAT_ID) sz += sizeof(std::uint64_t);
             // Skip over the entry count, and each entry
-            p += sizeof(uint64_t) + nr * sz;
+            p += sizeof(std::uint64_t) + nr * sz;
         }
         else
         {
             // Skip over the value
-            p += sizeof(uint64_t);
+            p += sizeof(std::uint64_t);
             // Skip over the id, if included
-            if(read_format & PERF_FORMAT_ID) p += sizeof(uint64_t);
+            if(read_format & PERF_FORMAT_ID) p += sizeof(std::uint64_t);
         }
 
         // Skip over the time_enabled field
-        if(read_format & PERF_FORMAT_TOTAL_TIME_ENABLED) p += sizeof(uint64_t);
+        if(read_format & PERF_FORMAT_TOTAL_TIME_ENABLED) p += sizeof(std::uint64_t);
         // Skip over the time_running field
-        if(read_format & PERF_FORMAT_TOTAL_TIME_RUNNING) p += sizeof(uint64_t);
+        if(read_format & PERF_FORMAT_TOTAL_TIME_RUNNING) p += sizeof(std::uint64_t);
     }
 
     // callchain
     if constexpr(SampleT == sample::callchain) return reinterpret_cast<Tp>(p);
     if(m_source != nullptr && m_source->is_sampling(sample::callchain))
     {
-        uint64_t nr = *reinterpret_cast<uint64_t*>(p);
-        p += sizeof(uint64_t) + (nr * sizeof(uint64_t));
+        const std::uint64_t nr = *reinterpret_cast<std::uint64_t*>(p);
+        p += sizeof(std::uint64_t) + (nr * sizeof(std::uint64_t));
     }
 
     // raw
     if constexpr(SampleT == sample::raw) return reinterpret_cast<Tp>(p);
     if(m_source != nullptr && m_source->is_sampling(sample::raw))
     {
-        uint32_t raw_size = *reinterpret_cast<uint32_t*>(p);
-        p += sizeof(uint32_t) + raw_size;
+        const std::uint32_t raw_size = *reinterpret_cast<std::uint32_t*>(p);
+        p += sizeof(std::uint32_t) + raw_size;
     }
 
     // branch_stack
@@ -688,7 +673,7 @@ get_instances()
 }  // namespace
 
 std::unique_ptr<perf_event>&
-get_instance(int64_t _tid)
+get_instance(std::int64_t _tid)
 {
     static auto nullInstance = std::unique_ptr<perf_event>{ nullptr };
     auto&       _data        = get_instances();
@@ -702,7 +687,7 @@ get_instance(int64_t _tid)
 
     if(static_cast<size_t>(_tid) >= _data->size())
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
         _data->resize(_tid + 1);
     }
     return _data->at(_tid);

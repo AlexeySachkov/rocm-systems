@@ -68,7 +68,12 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   memset(&device_info_, 0, sizeof(device_info_));
 
   NTSTATUS ret = ParseDeviceInfo();
+  pr_rocr_info("kmd_version:%" PRIu32 "\n", device_info_.kmd_version);
   device_info_.hwsInfo.hwsMask.aql_queue &= !dxg_runtime->use_pm4_;
+  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%" PRIu64 "\n",
+           device_info_.hwsInfo.hwsMask.aql_queue,
+           device_info_.hwsInfo.hwsMask.computeHwsEnabled,
+           (uint64_t)dxg_runtime->use_pm4_);
 
   if (ret == STATUS_OBJECT_NAME_NOT_FOUND || ret == STATUS_REVISION_MISMATCH) {
     // Skip adapter
@@ -81,6 +86,15 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
     init_status_ = kDeviceFailed;
     return;
   }
+
+  if (device_info_.max_scratch_slots_per_cu == 0)
+    device_info_.max_scratch_slots_per_cu = 32;
+
+  unsigned ver = static_cast<unsigned>(dxg_runtime->wddm_version);
+  if (ver)
+    pr_rocr_info("WDDM version %u.%u\n", ver / 1000, (ver % 1000) / 100);
+  else
+    pr_rocr_info("WDDM version: unknown\n");
 
   CreateDevice();
   SetPowerOptimization(false);
@@ -147,10 +161,16 @@ bool WDDMDevice::QuerySegmentInfo()
 
     SegmentInfo info;
     info.segment_id = i;
-    info.segment_type = seg.SegmentProperties.SegmentType;
-    info.system_memory = seg.SegmentProperties.SystemMemory;
-    info.aperture = seg.Aperture;
-    info.commit_limit = seg.CommitLimit;
+    info.is_aperture = seg.Aperture;
+    info.is_system_memory = seg.SegmentProperties.SystemMemory;
+
+    if (seg.Aperture) {
+      info.kind = SegmentKind::kAperture;
+    } else {
+      info.kind = seg.SegmentProperties.SystemMemory
+                      ? SegmentKind::kSystemMemory
+                      : SegmentKind::kLocalMemory;
+    }
 
     segment_infos_.push_back(info);
   }
@@ -158,77 +178,173 @@ bool WDDMDevice::QuerySegmentInfo()
   return true;
 }
 
-bool WDDMDevice::GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type,
-                              uint32_t &segment_id)
+bool WDDMDevice::FindSegmentId(SegmentKind segment_kind, uint32_t* segment_id)
 {
   for (const auto& seg_info : segment_infos_) {
-    if (seg_info.segment_type == segment_type) {
-      segment_id = seg_info.segment_id;
+    if (seg_info.kind == segment_kind) {
+      *segment_id = seg_info.segment_id;
       return true;
     }
   }
-  pr_err("Failed to get segment id for type %u\n", segment_type);
+
   return false;
 }
 
-/*Local heap(dedicated GPU memory) includes visiable heap and invisiable heap.
- *Non local heap refers to shared GPU memory and it is sytem memory.
+hsa_status_t WDDMDevice::QuerySegmentBytesResident(
+    uint32_t segment_id, uint64_t* bytes_resident) const {
+  D3DKMT_QUERYSTATISTICS stats = {};
+  stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+  stats.AdapterLuid = adapter_luid_;
+  stats.QuerySegment.SegmentId = segment_id;
+
+  NTSTATUS ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
+  if (ret != STATUS_SUCCESS) {
+    *bytes_resident = 0;
+    return HSA_STATUS_ERROR;
+  }
+
+  *bytes_resident = stats.QueryResult.SegmentInformation.BytesResident;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t WDDMDevice::QuerySegmentGroupUsage(
+    uint32_t segment_group, uint64_t* bytes_allocated) const {
+  *bytes_allocated = 0;
+
+  if (dxg_runtime->wddm_version < KMT_DRIVERVERSION_WDDM_3_1)
+    return HSA_STATUS_ERROR;
+
+  D3DKMT_QUERYSTATISTICS stats = {};
+  stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT_GROUP_USAGE;
+  stats.AdapterLuid = adapter_luid_;
+  stats.QuerySegmentGroupUsage.PhysicalAdapterIndex = 0;
+  stats.QuerySegmentGroupUsage.SegmentGroup =
+      static_cast<UINT16>(segment_group);
+
+  NTSTATUS ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
+  if (ret != STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  *bytes_allocated =
+      stats.QueryResult.SegmentGroupUsageInformation.AllocatedBytes;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t WDDMDevice::QueryLocalVramUsage(uint64_t* usage_bytes) {
+  *usage_bytes = 0;
+
+  if (dxg_runtime->wddm_version >= KMT_DRIVERVERSION_WDDM_3_1 &&
+      QuerySegmentGroupUsage(D3DKMT_MEMORY_SEGMENT_GROUP_LOCAL,
+                             usage_bytes) == HSA_STATUS_SUCCESS)
+    return HSA_STATUS_SUCCESS;
+
+  uint32_t visible_segment_id = 0;
+  if (!FindSegmentId(SegmentKind::kLocalMemory, &visible_segment_id))
+    return HSA_STATUS_ERROR;
+
+  hsa_status_t ret =
+      QuerySegmentBytesResident(visible_segment_id, usage_bytes);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
+
+  if (!LocalInvisibleHeapSize())
+    return HSA_STATUS_SUCCESS;
+
+  uint32_t invisible_segment_id = 0;
+  bool found_invisible = false;
+  for (const auto& seg_info : segment_infos_) {
+    if (seg_info.kind == SegmentKind::kLocalMemory &&
+        seg_info.segment_id > visible_segment_id) {
+      invisible_segment_id = seg_info.segment_id;
+      found_invisible = true;
+      break;
+    }
+  }
+
+  if (!found_invisible)
+    return HSA_STATUS_ERROR;
+
+  uint64_t invisible_usage = 0;
+  ret = QuerySegmentBytesResident(invisible_segment_id, &invisible_usage);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
+
+  *usage_bytes += invisible_usage;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t WDDMDevice::QueryNonLocalVramUsage(
+    uint64_t* usage_bytes) const {
+  *usage_bytes = 0;
+
+  if (dxg_runtime->wddm_version >= KMT_DRIVERVERSION_WDDM_3_1 &&
+      QuerySegmentGroupUsage(D3DKMT_MEMORY_SEGMENT_GROUP_NON_LOCAL,
+                             usage_bytes) == HSA_STATUS_SUCCESS)
+    return HSA_STATUS_SUCCESS;
+
+  bool found_segment = false;
+  for (const auto& seg_info : segment_infos_) {
+    if (!seg_info.is_aperture || !seg_info.is_system_memory)
+      continue;
+
+    found_segment = true;
+    uint64_t segment_usage = 0;
+    hsa_status_t ret =
+        QuerySegmentBytesResident(seg_info.segment_id, &segment_usage);
+    if (ret != HSA_STATUS_SUCCESS)
+      return ret;
+    *usage_bytes += segment_usage;
+  }
+
+  return found_segment ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+}
+
+uint64_t WDDMDevice::VramTotal() {
+  uint64_t total = LocalHeapSize();
+  if (!IsDgpu())
+    total += NonLocalHeapSize();
+  return total;
+}
+
+hsa_status_t WDDMDevice::QueryVramUsage(uint64_t* usage_bytes) {
+  hsa_status_t ret = QueryLocalVramUsage(usage_bytes);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
+
+  if (IsDgpu())
+    return HSA_STATUS_SUCCESS;
+
+  uint64_t used_non_local = 0;
+  ret = QueryNonLocalVramUsage(&used_non_local);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
+
+  *usage_bytes += used_non_local;
+  return HSA_STATUS_SUCCESS;
+}
+
+/*Local heap(dedicated GPU memory) includes visible heap and invisible heap.
+ *Non local heap refers to shared GPU memory and it is system memory.
  */
-uint64_t WDDMDevice::VramAvail(void) {
-  D3DKMT_QUERYSTATISTICS stats;
-  NTSTATUS ret;
-  uint64_t usedVis = 0;
-  uint64_t usedInv = 0;
-  uint64_t usedNonLocal = 0;
-  uint32_t segmentId = 0;
+hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
+  if (!available_bytes)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  *available_bytes = 0;
 
   // wait fence complete
   uint64_t value = page_fence_value_.load();
-  if(!CpuWait(&page_syncobj_, &value, 1, false))
+  if (!CpuWait(&page_syncobj_, &value, 1, false))
     return HSA_STATUS_ERROR;
 
-  if (IsDgpu()) {
-    // local cpu-visible memory
-    if(!GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE_MEMORY, segmentId))
-      return HSA_STATUS_ERROR;
+  uint64_t used = 0;
+  hsa_status_t ret = QueryVramUsage(&used);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
 
-    memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-    stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-    stats.AdapterLuid = adapter_luid_;
-    stats.QuerySegment.SegmentId = segmentId;
-    ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-    if (ret == 0)
-      usedVis = stats.QueryResult.SegmentInformation.BytesResident;
-
-    // local invisible memory
-    if (device_info_.local_invisible_heap_size) {
-      segmentId++;
-      memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-      stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-      stats.AdapterLuid = adapter_luid_;
-      stats.QuerySegment.SegmentId = 1;
-
-      ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-      if (ret == 0)
-        usedInv = stats.QueryResult.SegmentInformation.BytesResident;
-    }
-
-    return LocalHeapSize() - usedVis - usedInv;
-  } else {
-    // APU - NonLocal memory
-    if(!GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE_SYSMEM, segmentId))
-      return HSA_STATUS_ERROR;
-
-    memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-    stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-    stats.AdapterLuid = adapter_luid_;
-    stats.QuerySegment.SegmentId = segmentId;
-    ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-    if (ret == 0)
-      usedNonLocal = stats.QueryResult.SegmentInformation.BytesResident;
-
-    return NonLocalHeapSize() - usedNonLocal;
-  }
+  const uint64_t total = VramTotal();
+  *available_bytes = used >= total ? 0 : total - used;
+  return HSA_STATUS_SUCCESS;
 }
 
 bool WDDMDevice::CreateDevice(void) {
@@ -501,13 +617,34 @@ bool WDDMDevice::CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr) {
   return false;
 }
 
-void WDDMDevice::DestroySyncobj(D3DKMT_HANDLE handle) {
+bool WDDMDevice::DestroySyncobj(D3DKMT_HANDLE handle) {
   D3DKMT_DESTROYSYNCHRONIZATIONOBJECT args = {0};
   args.hSyncObject = handle;
 
   NTSTATUS ret = DXCORE_CALL(D3DKMTDestroySynchronizationObject(&args));
-  if (ret != STATUS_SUCCESS)
+  if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
+    return false;
+  }
+  return true;
+}
+
+bool WDDMDevice::OpenSyncobjFromNtHandle(void *nt_handle,
+                                         D3DKMT_HANDLE *out_handle) {
+  if (nt_handle == nullptr || out_handle == nullptr) return false;
+
+  D3DKMT_OPENSYNCOBJECTFROMNTHANDLE2 args = {0};
+  args.hNtHandle = nt_handle;
+  args.hDevice = device_;
+
+  NTSTATUS ret = DXCORE_CALL(D3DKMTOpenSyncObjectFromNtHandle2(&args));
+  if (ret != STATUS_SUCCESS) {
+    pr_err("D3DKMTOpenSyncObjectFromNtHandle2 failed: 0x%x\n", ret);
+    return false;
+  }
+
+  *out_handle = args.hSyncObject;
+  return true;
 }
 
 void WDDMDevice::InitCmdbufInfo(void) {
@@ -543,6 +680,14 @@ uint32_t WDDMDevice::LdsBlocks(const hsa_kernel_dispatch_packet_t *pkt) {
   return blk_num;
 }
 
+static void QueryWddmVersion(D3DKMT_HANDLE adapter) {
+  D3DKMT_DRIVERVERSION version = static_cast<D3DKMT_DRIVERVERSION>(0);
+
+  if (WDDMQueryAdapter(adapter, KMTQAITYPE_DRIVERVERSION, &version,
+                       sizeof(version)) == STATUS_SUCCESS)
+    dxg_runtime->wddm_version = version;
+}
+
 NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
 {
   bool supported = false;
@@ -565,6 +710,9 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
   ret = DXCORE_CALL(D3DKMTEnumAdapters3(&args));
   if (ret != STATUS_SUCCESS)
     goto err_out0;
+
+  if (args.NumAdapters > 0)
+    QueryWddmVersion(info[0].hAdapter);
 
   for (int i = 0; i < args.NumAdapters; i++) {
     D3DKMT_QUERY_DEVICE_IDS query = {0};
@@ -736,9 +884,18 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   memset(priv_data, 0, priv_size);
   bool FwManagedGfxState = SupportStateShadowingByCpFw();
   uint32_t* doorbell_loc = nullptr;
-  auto queue_memory = static_cast<ComputeQueue*>(queue)->GetAmdQueueMemory();
-  auto resource = queue_memory->KmtHandle();
-  Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, IsAqlSupported(),
+  // amd_queue_memory_ / KmtHandle and AQL parameters only apply when the queue
+  // is an AQL ComputeQueue. SDMAQueue (and SwsCompute non-AQL queues) must not
+  // be down-cast to ComputeQueue here -- doing so reads garbage and crashes.
+  ComputeQueue* compute_queue = dynamic_cast<ComputeQueue*>(queue);
+  D3DKMT_HANDLE resource = 0;
+  bool is_aql = false;
+  if (compute_queue != nullptr && IsAqlSupported()) {
+    auto queue_memory = compute_queue->GetAmdQueueMemory();
+    resource = queue_memory->KmtHandle();
+    is_aql = true;
+  }
+  Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, is_aql,
       queue->cmdbuf_addr, queue->cmdbuf_size, reinterpret_cast<uintptr_t>(queue->ring_wptr),
       reinterpret_cast<uintptr_t>(queue->ring_rptr), resource, &doorbell_loc);
 
@@ -841,9 +998,11 @@ bool WDDMDevice::SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint6
   void* priv_data = alloca(priv_size);
   memset(priv_data, 0, priv_size);
   Wkmi::FillinAqlSubmitPrivData(priv_data, fence_value);
+  // HwQueueProgressFenceId is UINT64 in the DDI; drop the 32-bit
+  // truncation so the full fence value reaches WDDM.
   D3DKMT_SUBMITCOMMANDTOHWQUEUE args = {
       .hHwQueue = queue->queue,
-      .HwQueueProgressFenceId = static_cast<ULONG>(fence_value + 1),
+      .HwQueueProgressFenceId = fence_value + 1,
       .CommandBuffer = command_addr,
       .CommandLength = static_cast<UINT>(command_size),
       .PrivateDriverDataSize = static_cast<UINT>(priv_size),
