@@ -241,10 +241,13 @@ This testcase verifies allocating global symbol memory and device variables
 in GPU-0 and add the MemcpyNodeFromSymbol node to the graph and
 verifying the result in GPU-1
 */
-#if HT_NVIDIA
 HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryPeerDevice) {
+#if HT_AMD
+  HIP_SKIP_TEST(HipTest::SkipReason::kMultiDeviceGraphUnsupportedOnAmd);
+#endif
   int numDevices = 0;
   int canAccessPeer = 0;
+  HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
     HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
     if (canAccessPeer) {
@@ -264,8 +267,12 @@ verifying the result in GPU-1
 */
 
 HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemoryPeerDevice) {
+#if HT_AMD
+  HIP_SKIP_TEST(HipTest::SkipReason::kMultiDeviceGraphUnsupportedOnAmd);
+#endif
   int numDevices = 0;
   int canAccessPeer = 0;
+  HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
     HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
     if (canAccessPeer) {
@@ -277,7 +284,6 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemoryPeerDevice) 
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
-#endif
 /*
 This testcaser verifies allocating global memory,
 Add MemcpyFromSymbolNode,KernelNode and memcpynode and validating

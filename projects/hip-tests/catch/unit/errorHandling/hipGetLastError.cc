@@ -829,7 +829,6 @@ HIP_TEST_CASE(Unit_hipGetLastError_with_Kernel_divide_by_zero) {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-#if HT_NVIDIA
 /**
  * Test Description
  * ------------------------
@@ -897,7 +896,6 @@ HIP_TEST_CASE(Unit_hipGetLastError_with_Kernel_Invalid_Configuration) {
   HIP_CHECK(hipFree(i_d));
   HIP_CHECK(hipStreamDestroy(stream));
 }
-#endif
 /**
  * Test Description
  * ------------------------

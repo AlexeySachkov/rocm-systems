@@ -218,18 +218,20 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemory) {
   hipGraphAddMemcpyNodeToSymbol_GlobalMemory(false, true);
 }
 
-#if HT_NVIDIA
 /*
 This testcase verifies allocating global symbol memory and device variables
 in GPU-0 and add the MemcpyNodeToSymbol node to the graph and
 verifying the result in GPU-1
 */
 HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalMemoryPeerDevice) {
+#if HT_AMD
+  HIP_SKIP_TEST(HipTest::SkipReason::kMultiDeviceGraphUnsupportedOnAmd);
+#endif
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
-    hipDeviceCanAccessPeer(&canAccessPeer, 0, 1);
+    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
     if (canAccessPeer) {
       hipGraphAddMemcpyNodeToSymbol_GlobalMemory(true, false);
     } else {
@@ -245,11 +247,14 @@ in GPU-0 and add the MemcpyNodeToSymbol node to the graph and
 verifying the result in GPU-1
 */
 HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemoryPeerDevice) {
+#if HT_AMD
+  HIP_SKIP_TEST(HipTest::SkipReason::kMultiDeviceGraphUnsupportedOnAmd);
+#endif
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
-    hipDeviceCanAccessPeer(&canAccessPeer, 0, 1);
+    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
     if (canAccessPeer) {
       hipGraphAddMemcpyNodeToSymbol_GlobalMemory(true, true);
     } else {
@@ -259,7 +264,6 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemoryPeerDevice) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
-#endif
 /*
 This testcaser verifies allocating global memory,
 Add MemcpyToSymbolNode,KernelNode and memcpynode and validating

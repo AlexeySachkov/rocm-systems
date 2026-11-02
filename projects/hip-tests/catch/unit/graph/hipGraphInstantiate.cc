@@ -81,7 +81,6 @@ HIP_TEST_CASE(Unit_hipGraphInstantiate_Basic) {
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
 }
-#if HT_NVIDIA
 /* Test Functional Scenario 2.a, 2.b, 2.c with hipGraphInstantiate and
 hipGraphInstantiateWithFlags.
 */
@@ -169,7 +168,6 @@ HIP_TEST_CASE(Unit_hipGraphInstantiate_InvalidCyclicGraph) {
   }
   HIP_CHECK(hipGraphDestroy(graph));
 }
-#endif
 /* Local function to initialize input data.
  */
 static void init_input(int* a, size_t size) {

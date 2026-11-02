@@ -40,8 +40,6 @@ void DeviceSetLimitTest(hipLimit_t limit) {
  */
 HIP_TEST_CASE(Unit_hipDeviceSetLimit_Positive_StackSize) { DeviceSetLimitTest(hipLimitStackSize); }
 
-#if HT_NVIDIA
-
 __device__ __managed__ bool stop = false;
 
 /**
@@ -56,6 +54,9 @@ __device__ __managed__ bool stop = false;
  *  - HIP_VERSION >= 5.3
  */
 HIP_TEST_CASE(Unit_hipDeviceSetLimit_Positive_PrintfFifoSize) {
+#if HT_AMD
+  HIP_SKIP_TEST("hipLimitPrintfFifoSize is not supported on AMD.");
+#endif
   DeviceSetLimitTest(hipLimitPrintfFifoSize);
 }
 
@@ -76,6 +77,9 @@ __global__ void PrintfKernel() {
  *  - HIP_VERSION >= 5.3
  */
 HIP_TEST_CASE(Unit_hipDeviceSetLimit_Negative_PrintfFifoSize) {
+#if HT_AMD
+  HIP_SKIP_TEST("hipLimitPrintfFifoSize is not supported on AMD.");
+#endif
   PrintfKernel<<<1, 1>>>();
   HIP_CHECK_ERROR(hipDeviceSetLimit(hipLimitPrintfFifoSize, 1024), hipErrorInvalidValue);
   stop = true;
@@ -115,14 +119,16 @@ __global__ void MallocKernel() {
  *  - HIP_VERSION >= 5.3
  */
 HIP_TEST_CASE(Unit_hipDeviceSetLimit_Negative_MallocHeapSize) {
+#if HT_AMD
+  // AMD only records the initial heap size, so changing it while a kernel is running succeeds.
+  HIP_SKIP_TEST("hipLimitMallocHeapSize can be changed while a kernel is running on AMD.");
+#endif
   MallocKernel<<<1, 1>>>();
   HIP_CHECK_ERROR(hipDeviceSetLimit(hipLimitMallocHeapSize, 1024), hipErrorInvalidValue);
   stop = true;
   HIP_CHECK(hipDeviceSynchronize());
   stop = false;
 }
-
-#endif
 
 /**
  * Test Description

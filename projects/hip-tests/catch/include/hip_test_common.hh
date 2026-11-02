@@ -611,6 +611,8 @@ inline constexpr char const kTextureImageUnsupported[] =
     "texture/image is not supported on this device.";
 inline constexpr char const kApiUnsupportedOnNvidia[] =
     "API is not supported on NVIDIA.";
+inline constexpr char const kMultiDeviceGraphUnsupportedOnAmd[] =
+    "multi-device graphs are not supported on AMD.";
 inline constexpr char const kTextureGatherUnsupportedAmd[] =
     "texture gather arrays are not supported on AMD backend.";
 inline constexpr char const kPitch2DSamplerModesSupportedOnNvidia[] =

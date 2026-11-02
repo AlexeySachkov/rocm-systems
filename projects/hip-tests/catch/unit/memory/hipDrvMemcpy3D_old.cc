@@ -146,10 +146,13 @@ template <typename T> void DrvMemcpy3D<T>::NegativeTests() {
     REQUIRE(hipDrvMemcpy3D(&myparms) != hipSuccess);
   }
 
+  // hipDrvMemcpy3D does not validate this bound on AMD.
+#if HT_NVIDIA
   SECTION("Passing width > max width size") {
     myparms.WidthInBytes = width * sizeof(T) + 1;
     REQUIRE(hipDrvMemcpy3D(&myparms) != hipSuccess);
   }
+#endif
 
   SECTION("Passing height > max height size") {
     myparms.Height = height + 1;
@@ -161,6 +164,8 @@ template <typename T> void DrvMemcpy3D<T>::NegativeTests() {
     REQUIRE(hipDrvMemcpy3D(&myparms) != hipSuccess);
   }
 
+  // hipDrvMemcpy3D does not validate this bound on AMD.
+#if HT_NVIDIA
   SECTION("widthinbytes + srcXinBytes is out of bound") {
     myparms.srcXInBytes = 1;
     myparms.dstArray = nullptr;
@@ -170,6 +175,7 @@ template <typename T> void DrvMemcpy3D<T>::NegativeTests() {
     myparms.dstMemoryType = hipMemoryTypeDevice;
     REQUIRE(hipDrvMemcpy3D(&myparms) != hipSuccess);
   }
+#endif
 
   SECTION("widthinbytes + dstXinBytes is out of bound") {
     myparms.dstXInBytes = pitch_D;
@@ -181,6 +187,8 @@ template <typename T> void DrvMemcpy3D<T>::NegativeTests() {
     REQUIRE(hipDrvMemcpy3D(&myparms) != hipSuccess);
   }
 
+  // hipDrvMemcpy3D does not validate this bound on AMD.
+#if HT_NVIDIA
   SECTION("srcY + height is out of bound") {
     myparms.srcY = 1;
     myparms.dstArray = nullptr;
@@ -190,6 +198,7 @@ template <typename T> void DrvMemcpy3D<T>::NegativeTests() {
     myparms.dstMemoryType = hipMemoryTypeDevice;
     REQUIRE(hipDrvMemcpy3D(&myparms) != hipSuccess);
   }
+#endif
 
   SECTION("dstY + height out of bounds") {
     myparms.dstY = 1;
@@ -240,6 +249,7 @@ template <typename T> void DrvMemcpy3D<T>::NegativeTests() {
 
   SECTION("Nullptr to hipDrvMemcpy3D") { REQUIRE(hipDrvMemcpy3D(nullptr) != hipSuccess); }
 
+  (void)hipGetLastError();  // reset the error so it doesn't leak into subsequent tests
   DeAllocateMemory();
 }
 /*
@@ -461,7 +471,6 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_HosttoDevice) {
   memcpy3d_D2H_float.HostDevice_DrvMemcpy3D();
 }
 
-#if HT_NVIDIA
 /**
  * Test Description
  * ------------------------
@@ -479,7 +488,6 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Negative) {
   DrvMemcpy3D<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
   memcpy3d.NegativeTests();
 }
-#endif
 
 /**
  * Test Description

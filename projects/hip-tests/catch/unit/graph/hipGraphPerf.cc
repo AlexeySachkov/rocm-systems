@@ -2460,7 +2460,6 @@ HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecUpdate) {
   }
 }
 
-#if HT_NVIDIA
 static void hipGraph_PerfCheck_hipGraphExecUpdate_kernel_inLoop(const hipStream_t& stream) {
   constexpr int kNumNode = 45;
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
@@ -2600,7 +2599,6 @@ HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecUpdate_kernel_inLoop) {
     }
   }
 }
-#endif
 #endif  //  #if __linux__
 
 /**

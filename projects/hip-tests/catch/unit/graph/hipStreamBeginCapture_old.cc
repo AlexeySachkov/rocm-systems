@@ -837,7 +837,6 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_CapturingMultGraphsFrom1Strm) {
   }
   HIP_CHECK(hipStreamDestroy(stream1));
 }
-#if HT_NVIDIA
 /* Test scenario 13
  */
 HIP_TEST_CASE(Unit_hipStreamBeginCapture_CheckingSyncDuringCapture) {
@@ -881,7 +880,6 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_CheckingSyncDuringCapture) {
   }
   HIP_CHECK(hipStreamDestroy(stream));
 }
-#endif
 /* Test scenario 14
  */
 HIP_TEST_CASE(Unit_hipStreamBeginCapture_EndingCapturewhenCaptureInProgress) {

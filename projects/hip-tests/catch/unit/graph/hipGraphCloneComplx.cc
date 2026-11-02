@@ -935,7 +935,6 @@ HIP_TEST_CASE(Unit_hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec) {
   hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec();
 }
 
-#if HT_NVIDIA
 /* Scenarios 15 - Once Graph and ClonedGraph created, modify Kernel node of
  clonedGraph by using hipGraphRemoveDependencies and Instantiate and launch
  the clonedGraph and verify the update for hipGraphRemoveDependencies
@@ -1003,7 +1002,6 @@ static void hipGraphClone_Test_hipGraphRemoveDependencies() {
 HIP_TEST_CASE(Unit_hipGraphClone_Test_hipGraphRemoveDependencies) {
   hipGraphClone_Test_hipGraphRemoveDependencies();
 }
-#endif
 
 /* Scenarios 16 - Once Graph and ClonedGraph created, modify Kernel node of
  clonedGraph by using hipGraphExecChildGraphNodeSetParams and Instantiate and launch
@@ -1712,9 +1710,7 @@ static void hipGraphClone_Test_All_API(int dev) {
   hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec();
   hipGraphClone_hipGraphMemcpyNodeSetParamsToSymbol_exec();
   hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec();
-#if HT_NVIDIA
   hipGraphClone_Test_hipGraphRemoveDependencies();
-#endif
   hipGraphClone_Test_hipGraphExecChildGraphNodeSetParams();
   hipGraphClone_Test_hipGraphEventRecordNodeSetEvent_and_Exec();
   hipGraphClone_Test_hipGraphEventWaitNodeSetEvent_and_Exec();
