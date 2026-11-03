@@ -231,7 +231,6 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeArray_NullptrArray) {
   CTX_DESTROY();
 }
 
-#if 0
 HIP_TEST_CASE(Unit_TexObjectCreate_TypeMipmapped) {
   CHECK_IMAGE_SUPPORT
 
@@ -291,7 +290,6 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeMipmaped_IncompleteInit) {
   HIP_CHECK(hipFreeMipmappedArray(mipmapped_array));
   CTX_DESTROY();
 }
-#endif
 
 HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D) {
   CHECK_IMAGE_SUPPORT

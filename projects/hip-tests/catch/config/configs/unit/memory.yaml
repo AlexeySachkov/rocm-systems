@@ -1870,10 +1870,26 @@ memory:
   Unit_hipMalloc_Positive_APU_LargeAllocSpill:
     <<: *level_default
     tags: [alloc]
-  Unit_hipMalloc_Allocate110PercentOfDeviceMemory: *level_default
-  Unit_hipMalloc_AllocateAvailableVRAMAndPossibleRAM: *level_default
-  Unit_hipMalloc_AllocateMoreThanTotalRAM: *level_default
-  Unit_hipMalloc_AllocateMoreThanTotalVRAM: *level_default
+  Unit_hipMalloc_Allocate110PercentOfDeviceMemory:
+    <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 (previously SWDEV-501675) - re-enabled after passing on Linux; not yet re-verified on Windows."
+  Unit_hipMalloc_AllocateAvailableVRAMAndPossibleRAM:
+    <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 (previously SWDEV-501675) - re-enabled after passing on Linux; not yet re-verified on Windows."
+  Unit_hipMalloc_AllocateMoreThanTotalRAM:
+    <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 (previously SWDEV-501675) - re-enabled after passing on Linux; not yet re-verified on Windows."
+  Unit_hipMalloc_AllocateMoreThanTotalVRAM:
+    <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 (previously SWDEV-501675) - re-enabled after passing on Linux; not yet re-verified on Windows."
   Unit_hipMalloc3D_ValidatePitch:
     <<: *level_default
     disabled:
@@ -2309,8 +2325,15 @@ memory:
     tags: [alloc, P1]
   Unit_hipFreeDoubleArrayFree:
     <<: *level_default
+    disabled:
+      targets: [nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2744 - tracked issue EXSWCPHIPT-120 on NVIDIA."
     tags: [alloc]
-  Unit_hipFreeDoubleArrayDestroy: *level_default
+  Unit_hipFreeDoubleArrayDestroy:
+    <<: *level_default
+    disabled:
+      targets: [nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2744 - tracked issue EXSWCPHIPT-120 on NVIDIA."
   Unit_hipFreeDoubleArray:
     <<: *level_default
     tags: [alloc, image, P1]

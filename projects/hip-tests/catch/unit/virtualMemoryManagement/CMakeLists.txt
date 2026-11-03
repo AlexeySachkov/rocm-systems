@@ -4,13 +4,8 @@
 
 set(TEST_SRC
     hipMemGetAllocationGranularity.cc
-    hipMemRetainAllocationHandle.cc)
-
-if(HIP_PLATFORM MATCHES "nvidia")
-  set(TEST_SRC
-    ${TEST_SRC}
+    hipMemRetainAllocationHandle.cc
     hipMemMapArrayAsync.cc)
-endif()
 
 if(UNIX)
   if(HIP_PLATFORM MATCHES "amd")

@@ -272,9 +272,15 @@ texture:
     tags: [texobj, image]
   Unit_TexObjectCreate_TypeMipmapped:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 (preivously SWDEV-558845) - re-enabled after passing on Linux; not yet re-verified on Windows."
     tags: [texobj, image]
   Unit_TexObjectCreate_TypeMipmaped_IncompleteInit:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 (preivously SWDEV-558845) - re-enabled after passing on Linux; not yet re-verified on Windows."
     tags: [texobj, image]
   Unit_TexObjectCreate_TypePitch2D:
     <<: *level_default
@@ -617,39 +623,75 @@ texture:
     tags: [sample, image]
   Unit_texCubemap_Positive_ReadModeElementType:
     <<: *level_default
+    unsupported:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2892 - cubemap textures are not supported on AMD: hipArrayCubemap allocations fail with hipErrorInvalidValue."
     tags: [image]
   Unit_texCubemap_Positive_ReadModeNormalizedFloat:
     <<: *level_default
+    unsupported:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2892 - cubemap textures are not supported on AMD: hipArrayCubemap allocations fail with hipErrorInvalidValue."
     tags: [image]
   Unit_texCubemapGrad_Positive_ReadModeElementType:
     <<: *level_default
+    unsupported:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2892 - cubemap textures are not supported on AMD: hipArrayCubemap allocations fail with hipErrorInvalidValue."
     tags: [image]
   Unit_texCubemapGrad_Positive_ReadModeNormalizedFloat:
     <<: *level_default
+    unsupported:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2892 - cubemap textures are not supported on AMD: hipArrayCubemap allocations fail with hipErrorInvalidValue."
     tags: [image]
   Unit_texCubemapLayered_Positive_ReadModeElementType:
     <<: *level_default
+    unsupported:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2892 - cubemap textures are not supported on AMD: hipArrayCubemap allocations fail with hipErrorInvalidValue."
     tags: [image]
   Unit_texCubemapLayered_Positive_ReadModeNormalizedFloat:
     <<: *level_default
+    unsupported:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2892 - cubemap textures are not supported on AMD: hipArrayCubemap allocations fail with hipErrorInvalidValue."
     tags: [image]
   Unit_texCubemapLayeredGrad_Positive_ReadModeElementType:
     <<: *level_default
+    unsupported:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2892 - cubemap textures are not supported on AMD: hipArrayCubemap allocations fail with hipErrorInvalidValue."
     tags: [image]
   Unit_texCubemapLayeredGrad_Positive_ReadModeNormalizedFloat:
     <<: *level_default
+    unsupported:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2892 - cubemap textures are not supported on AMD: hipArrayCubemap allocations fail with hipErrorInvalidValue."
     tags: [image]
   Unit_texCubemapLayeredLod_Positive_ReadModeElementType:
     <<: *level_default
+    unsupported:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2892 - cubemap textures are not supported on AMD: hipArrayCubemap allocations fail with hipErrorInvalidValue."
     tags: [image]
   Unit_texCubemapLayeredLod_Positive_ReadModeNormalizedFloat:
     <<: *level_default
+    unsupported:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2892 - cubemap textures are not supported on AMD: hipArrayCubemap allocations fail with hipErrorInvalidValue."
     tags: [image]
   Unit_texCubemapLod_Positive_ReadModeElementType:
     <<: *level_default
+    unsupported:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2892 - cubemap textures are not supported on AMD: hipArrayCubemap allocations fail with hipErrorInvalidValue."
     tags: [image]
   Unit_texCubemapLod_Positive_ReadModeNormalizedFloat:
     <<: *level_default
+    unsupported:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2892 - cubemap textures are not supported on AMD: hipArrayCubemap allocations fail with hipErrorInvalidValue."
     tags: [image]
   Unit_hipDeviceGetTexture1DLinearMaxWidth_Positive:
     <<: *level_default

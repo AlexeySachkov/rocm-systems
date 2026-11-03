@@ -50,7 +50,6 @@ This testcase verifies the size 0 check of hipMemcpyHtoA API
 This is excluded for AMD as we have a bug already raised
 SWDEV-274683
 */
-#if HT_NVIDIA
 HIP_TEST_CASE(Unit_hipMemcpyHtoA_Positive_ZeroCount) {
   CHECK_IMAGE_SUPPORT
 
@@ -74,7 +73,7 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoA_Positive_ZeroCount) {
   BEGIN_CAPTURE_SYNC(memcpy_err, false);
   HIP_CHECK_ERROR(hipMemcpyHtoA(array_alloc.ptr(), 0, host_alloc.ptr(), 0), memcpy_err);
   END_CAPTURE_SYNC(memcpy_err);
-  if (memcpy_err = hipErrorStreamCaptureImplicit) {
+  if (memcpy_err == hipErrorStreamCaptureImplicit) {
     return;
   }
 
@@ -83,7 +82,6 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoA_Positive_ZeroCount) {
 
   ArrayFindIfNot(host_alloc.host_ptr(), static_cast<uint8_t>(42), width);
 }
-#endif
 
 HIP_TEST_CASE(Unit_hipMemcpyHtoA_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT

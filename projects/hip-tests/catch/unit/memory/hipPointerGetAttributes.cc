@@ -319,8 +319,8 @@ HIP_TEST_CASE(Unit_hipPointerGetAttributes_TinyClusterAlloc) {
 
 // Multi-threaded test with many simul allocs.
 // IN : serialize will force the test to run in serial fashion.
-#if 0  // FIXME_jatinx These need to be ported to HIP_CHECK_THREAD.
-Disabling it for now
+// clusterAllocs uses HIP_CHECK/REQUIRE, which are not thread-safe, so the threads must stay
+// serialized until it is ported to HIP_CHECK_THREAD.
 HIP_TEST_CASE(Unit_hipPointerGetAttributes_MultiThread) {
   srand(0x300);
   auto serialize = 1;
@@ -340,7 +340,6 @@ HIP_TEST_CASE(Unit_hipPointerGetAttributes_MultiThread) {
   std::thread t4(clusterAllocs, 1000, 1, 4);
   if (serialize) t4.join();
 }
-#endif
 /**
  * Test Description
  * ------------------------

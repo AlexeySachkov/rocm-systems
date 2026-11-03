@@ -31,6 +31,11 @@
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemMapArrayAsync_Positive_Basic) {
+#if HT_AMD
+  // Sparse arrays aren't supported on AMD: hipMemMapArrayAsync always returns hipErrorNotSupported
+  // and the CUDA sparse-array flags used below have no HIP equivalent.
+  HIP_SKIP_TEST("hipMemMapArrayAsync is not supported on AMD.");
+#else
   HIP_CHECK(hipFree(0));
 
   hipDevice_t device;
@@ -91,6 +96,7 @@ HIP_TEST_CASE(Unit_hipMemMapArrayAsync_Positive_Basic) {
   HIP_CHECK(hipMemRelease(handle));
 
   HIP_CHECK(hipMipmappedArrayDestroy(array));
+#endif
 }
 
 /**

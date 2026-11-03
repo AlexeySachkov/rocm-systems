@@ -270,6 +270,12 @@ template <typename T> static void runTestRW(const int width, const int height) {
  */
 HIP_TEMPLATE_TEST_CASE(Unit_surfCubemapLayeredread_Positive_Basic, char, unsigned char, short,
                    unsigned short, int, unsigned int, float) {
+#if HT_AMD
+  // On AMD, surfCubemapLayeredread/surfCubemapLayeredwrite take separate face and layer indices
+  // instead of a combined layerFace index, so this test doesn't compile (EXSWHTEC-377).
+  FAIL("surfCubemapLayeredread/surfCubemapLayeredwrite signatures are incompatible on AMD "
+       "(EXSWHTEC-377).");
+#else
   CHECK_IMAGE_SUPPORT;
 
   const int width = GENERATE(31, 67);
@@ -278,6 +284,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_surfCubemapLayeredread_Positive_Basic, char, unsigne
   runTestR<vector_type_helper_t<TestType, 1>>(width, height);
   runTestR<vector_type_helper_t<TestType, 2>>(width, height);
   runTestR<vector_type_helper_t<TestType, 4>>(width, height);
+#endif
 }
 
 /**
@@ -293,6 +300,12 @@ HIP_TEMPLATE_TEST_CASE(Unit_surfCubemapLayeredread_Positive_Basic, char, unsigne
  */
 HIP_TEMPLATE_TEST_CASE(Unit_surfCubemapLayeredwrite_Positive_Basic, char, unsigned char, short,
                    unsigned short, int, unsigned int, float) {
+#if HT_AMD
+  // On AMD, surfCubemapLayeredread/surfCubemapLayeredwrite take separate face and layer indices
+  // instead of a combined layerFace index, so this test doesn't compile (EXSWHTEC-377).
+  FAIL("surfCubemapLayeredread/surfCubemapLayeredwrite signatures are incompatible on AMD "
+       "(EXSWHTEC-377).");
+#else
   CHECK_IMAGE_SUPPORT;
 
   const int width = GENERATE(31, 67);
@@ -301,6 +314,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_surfCubemapLayeredwrite_Positive_Basic, char, unsign
   runTestW<vector_type_helper_t<TestType, 1>>(width, height);
   runTestW<vector_type_helper_t<TestType, 2>>(width, height);
   runTestW<vector_type_helper_t<TestType, 4>>(width, height);
+#endif
 }
 
 /**
@@ -316,6 +330,12 @@ HIP_TEMPLATE_TEST_CASE(Unit_surfCubemapLayeredwrite_Positive_Basic, char, unsign
  */
 HIP_TEMPLATE_TEST_CASE(Unit_surfCubemapLayered_Positive_ReadWrite, char, unsigned char, short,
                    unsigned short, int, unsigned int, float) {
+#if HT_AMD
+  // On AMD, surfCubemapLayeredread/surfCubemapLayeredwrite take separate face and layer indices
+  // instead of a combined layerFace index, so this test doesn't compile (EXSWHTEC-377).
+  FAIL("surfCubemapLayeredread/surfCubemapLayeredwrite signatures are incompatible on AMD "
+       "(EXSWHTEC-377).");
+#else
   CHECK_IMAGE_SUPPORT;
 
   const int width = GENERATE(31, 67);
@@ -324,6 +344,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_surfCubemapLayered_Positive_ReadWrite, char, unsigne
   runTestRW<vector_type_helper_t<TestType, 1>>(width, height);
   runTestRW<vector_type_helper_t<TestType, 2>>(width, height);
   runTestRW<vector_type_helper_t<TestType, 4>>(width, height);
+#endif
 }
 
 /**

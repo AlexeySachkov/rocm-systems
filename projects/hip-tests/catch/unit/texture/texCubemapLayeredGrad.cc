@@ -35,7 +35,6 @@
 HIP_TEMPLATE_TEST_CASE(Unit_texCubemapLayeredGrad_Positive_ReadModeElementType, char,
                    unsigned char, short, unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
-  HIP_SKIP_TEST("texCubemap isn't supported.");
   TextureTestParams<TestType> params = {};
   params.extent = make_hipExtent(2, 2, 6);
   params.num_subdivisions = 4;
@@ -120,7 +119,6 @@ HIP_TEMPLATE_TEST_CASE(Unit_texCubemapLayeredGrad_Positive_ReadModeElementType, 
 HIP_TEMPLATE_TEST_CASE(Unit_texCubemapLayeredGrad_Positive_ReadModeNormalizedFloat, char,
                    unsigned char, short, unsigned short) {
   CHECK_IMAGE_SUPPORT;
-  HIP_SKIP_TEST("texCubemap isn't supported.");
   TextureTestParams<TestType> params = {};
   params.extent = make_hipExtent(2, 2, 6);
   params.num_subdivisions = 4;
@@ -177,7 +175,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_texCubemapLayeredGrad_Positive_ReadModeNormalizedFlo
             INFO("x: " << std::fixed << std::setprecision(16) << x);
             INFO("y: " << std::fixed << std::setprecision(16) << y);
             INFO("z: " << std::fixed << std::setprecision(16) << z);
-            REQUIRE(false;)
+            REQUIRE(false);
           }
         }
       }

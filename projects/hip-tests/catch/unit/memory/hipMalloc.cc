@@ -59,9 +59,6 @@ HIP_TEST_CASE(Unit_hipMalloc_Negative_Parameters) {
   (void)hipGetLastError();
 }
 
-// Commenting this due to defect SWDEV-501675, used in below commented tests
-#if 0
-/**
 /**
  * Local Function to Get total RAM size in bytes
  */
@@ -93,7 +90,6 @@ static inline size_t getAvailableRAM() {
   return (statex.ullAvailPhys);
 #endif
 }
-#endif
 
 /**
  * In addKernel function, all elements of the array a increased by 1
@@ -211,8 +207,6 @@ HIP_TEST_CASE(Unit_hipMalloc_Positive_APU_LargeAllocSpill) {
   HIP_CHECK(hipFree(devMem));
 }
 
-// Commenting this due to defect SWDEV-501675
-#if 0
 /**
  * Test Description
  * ------------------------
@@ -279,10 +273,7 @@ HIP_TEST_CASE(Unit_hipMalloc_Allocate110PercentOfDeviceMemory) {
   HIP_CHECK(hipFree(devMem));
 #endif
 }
-#endif
 
-// Commenting this due to defect SWDEV-501675
-#if 0
 /**
  * Test Description
  * ------------------------
@@ -442,4 +433,3 @@ HIP_TEST_CASE(Unit_hipMalloc_AllocateMoreThanTotalVRAM) {
   HIP_CHECK(hipFree(devMem));
 #endif
 }
-#endif

@@ -42,7 +42,6 @@ This testcase verifies size 0 check of hipMemcpyAtoH API
 Excluded the testcase for amd,as there is already a bug raised
 SWDEV-274683
 */
-#if HT_NVIDIA
 HIP_TEST_CASE(Unit_hipMemcpyAtoH_Positive_ZeroCount) {
   CHECK_IMAGE_SUPPORT
 
@@ -72,7 +71,6 @@ HIP_TEST_CASE(Unit_hipMemcpyAtoH_Positive_ZeroCount) {
 
   ArrayFindIfNot(host_alloc.host_ptr(), static_cast<uint8_t>(fill_value), width);
 }
-#endif
 
 HIP_TEST_CASE(Unit_hipMemcpyAtoH_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT

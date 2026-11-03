@@ -67,6 +67,12 @@ set(NOT_FOR_gfx90a_AND_ABOVE_TEST
     tex2DLayered.cc
     tex3D.cc
     tex3DGrad.cc
+    texCubemap.cc
+    texCubemapGrad.cc
+    texCubemapLayered.cc
+    texCubemapLayeredGrad.cc
+    texCubemapLayeredLod.cc
+    texCubemapLod.cc
     hipBindTextureToMipmappedArray.cc
     hipMallocMipmappedArray.cc
     hipFreeMipmappedArray.cc

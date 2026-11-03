@@ -278,9 +278,8 @@ HIP_TEST_CASE(Unit_hipFreeInteriorPtrHost) {
   }
 }
 
-#if HT_NVIDIA
 HIP_TEST_CASE(Unit_hipFreeDoubleArrayFree) {
-  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-120.");
+  CHECK_IMAGE_SUPPORT
 
   size_t width = GENERATE(32, 512, 1024);
   size_t height = GENERATE(0, 32, 512, 1024);
@@ -297,7 +296,7 @@ HIP_TEST_CASE(Unit_hipFreeDoubleArrayFree) {
 }
 
 HIP_TEST_CASE(Unit_hipFreeDoubleArrayDestroy) {
-  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-120.");
+  CHECK_IMAGE_SUPPORT
   using vec_info = vector_info<char>;
 
   size_t width = GENERATE(32, 512, 1024);
@@ -314,8 +313,6 @@ HIP_TEST_CASE(Unit_hipFreeDoubleArrayDestroy) {
   HIP_CHECK(hipArrayDestroy(ArrayPtr));
   HIP_CHECK_ERROR(hipArrayDestroy(ArrayPtr), hipErrorContextIsDestroyed);
 }
-
-#else  // AMD
 
 HIP_TEST_CASE(Unit_hipFreeDoubleArray) {
   CHECK_IMAGE_SUPPORT
@@ -339,8 +336,6 @@ HIP_TEST_CASE(Unit_hipFreeDoubleArray) {
     HIP_CHECK_ERROR(hipArrayDestroy(arrayPtr), hipErrorContextIsDestroyed);
   }
 }
-
-#endif
 
 
 HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTDev, char, int, float2, float4) {
